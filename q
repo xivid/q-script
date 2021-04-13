@@ -803,94 +803,36 @@ class VMCreateCommand(SubCommand):
     help = "Create VM guests"
 
     def args(self, parser):
-        parser.add_argument("-f", "--flavor", default="fedora",
+        parser.add_argument("-f", "--flavor", default="ubuntu",
                             help="Guest VM flavor to create. "
                                  "Supported: fedora")
-        parser.add_argument("-n", "--nocreate", action="store_true",
-                            help="Don't create the image")
         parser.add_argument("image", help="Image file")
 
-    def _create_fedora(self, args):
-        ks = """\
-text
-zerombr
-clearpart --all
-timezone --utc Asia/Shanghai
-part / --grow --size=1 --ondisk=sda --asprimary
-install
-repo --name=release --mirrorlist=http://mirrors.fedoraproject.org/mirrorlist?repo=fedora-28&arch=x86_64
-cdrom
-bootloader --location=mbr --timeout=1
-rootpw qshroot
-poweroff
-selinux --disabled
-
-%packages
-fio
-%end
-%post
-echo q-vm-fedora > /etc/hostname
-
-mkdir -m0700 /root/.ssh/
-cat <<EOF >/root/.ssh/authorized_keys
-""" + \
-open(os.path.expanduser("~/.ssh/id_rsa.pub"), "r").read() + \
-"""
-EOF
-%end
-"""
-        url = "http://mirrors.163.com/fedora/releases/28/Server/x86_64/iso/Fedora-Server-dvd-x86_64-28-1.1.iso"
-        vmdir = os.path.join(self._cache_dir, "fedora")
-        if not os.path.exists(vmdir):
-            os.makedirs(vmdir)
-        isofile = os.path.join(vmdir, "fedora.iso")
-        checksum = "8d59a25052e05758c15fe9daa3bc472b5619791b442e752450bba7f1eeca9c1a"
-        if os.path.exists(isofile) and os.path.getsize(isofile) == 2903506944:
-            logging.info("Image already downloaded")
-        else:
-            subprocess.check_call(["wget", "-c", url, "-O", isofile])
-        logging.debug("mounting iso")
-        mntdir = tempfile.mkdtemp()
-        subprocess.check_call(["sudo", "mount", "-o", "loop,ro", isofile, mntdir])
-        try:
-            ksf = open(os.path.join(vmdir, "fedora.ks"), "w")
-            ksf.write(ks)
-            ksf.close()
-            webp = subprocess.Popen(["python3", "-m", "http.server", "26789"],
-                                    cwd=vmdir)
-            vmlinuz = os.path.join(mntdir, "isolinux", "vmlinuz")
-            initrd = os.path.join(mntdir, "isolinux", "initrd.img")
-            if not args.nocreate:
-                if args.image.endswith(".qcow2"):
-                    fmt = "qcow2"
-                else:
-                    fmt = "raw"
-                subprocess.check_call(["qemu-img", "create",
-                                      args.image, "-f", fmt, "32G"])
-            subprocess.check_call(["qemu-system-x86_64", "-enable-kvm",
-                                   "-display", "none", "-vnc", ":0",
-                                   "-m", "2G", "-serial", "stdio",
-                                   "-netdev", "user,id=vnet,hostfwd=:0.0.0.0:0-:22",
-                                   "-device", "virtio-net-pci,netdev=vnet",
-                                   "-cdrom", isofile,
-                                   "-drive", "file=%s,if=none,id=d0,cache=unsafe" % args.image,
-                                   "-device", "virtio-scsi",
-                                   "-device", "scsi-hd,drive=d0",
-                                   "-kernel", vmlinuz,
-                                   "-initrd", initrd,
-                                   "-append", "console=ttyS0 ks=http://10.0.2.2:26789/fedora.ks"])
-        except:
-            raise
-        finally:
-            subprocess.check_call(["sudo", "umount", mntdir])
-            webp.kill()
+    def _create_ubuntu(self, args):
+        cloudimg = os.path.join(self._cache_dir, "ubuntu2004.img")
+        if not os.path.exists(cloudimg):
+            cloudimg_tmp = cloudimg + ".tmp"
+            subprocess.check_call(["wget",
+                "-O", cloudimg_tmp,
+                "https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img",
+                ])
+            subprocess.check_call(["mv", cloudimg_tmp, cloudimg])
+        subprocess.check_call(["cp", cloudimg, args.image])
+        subprocess.check_call(["qemu-img", 'resize', args.image, '10G'])
+        # reinstal openssh server to generate host keys
+        subprocess.check_call(['virt-customize',
+            '--uninstall', 'cloud-init,openssh-server',
+            '--install', 'dhcpcd5,openssh-server',
+            '--root-password', 'password:testpass',
+            '--ssh-inject', 'root',
+            '-a', args.image])
 
     def do(self, args, argv):
         self._cache_dir = os.path.join(Q_RUNDIR, ".vmcreate")
         if not os.path.exists(self._cache_dir):
             os.makedirs(self._cache_dir)
-        if args.flavor == "fedora":
-            return self._create_fedora(args)
+        if args.flavor in ['ubuntu', 'ubuntu2004']:
+            return self._create_ubuntu(args)
         else:
             logging.error("Unknown flavor: %s" % args.flavor)
             return 1
