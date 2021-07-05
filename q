@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Copyright 2012-2021 Fam Zheng <fam@euphon.net>
+Copyright 2021 Bytedance Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -355,6 +356,8 @@ class QemuCommand(SubCommand):
                             help="Don't add network")
         parser.add_argument("--wait-ssh", "-w", action="store_true",
                             help="Wait for guest SSH service to start")
+        parser.add_argument("--run-cmd", "-c",
+                            help="Run command in guest and exit")
         parser.add_argument("--net", default="10.0.2.0/24",
                             help="CIDR for the user net")
         parser.add_argument("--host", default="10.0.2.2",
@@ -482,34 +485,11 @@ class QemuCommand(SubCommand):
         return ["-chardev", "stdio,id=" + i,
                 "-device", "isa-debugcon,iobase=0x402,chardev=" + i]
 
-    def _guest_rhel5(self, s):
-        return self._parse_argv(["+vblk:/stor/vm/RHEL-Server-5.11-64-virtio.qcow2,cache=writeback"])
-
-    def _guest_rhel7(self, s):
-        return self._parse_argv(["+sd:/stor/vm/rhel7.qcow2"])
-
-    def _guest_rhel6(self, s):
-        return self._parse_argv(["+sd:/stor/vm/rhel6.qcow2"])
-
-    def _guest_centos6(self, s):
-        return self._parse_argv(["+sd:/stor/vm/centos6.qcow2"])
-
-    def _guest_centos7(self, s):
-        return self._parse_argv(["+sd:/stor/vm/centos7.qcow2"])
-
-    def _guest_fedora(self, s):
-        return self._parse_argv(["+sd-boot:/stor/vm/fedora.img"])
-
-    def _guest_null(self, s):
-        return self._parse_argv(["+vblk:null-co://"])
-
     def _parse_one(self, v):
         if v and v[0] not in "@+":
             return [v]
         if v.startswith("+"):
             prefix = "_devtmpl_"
-        else:
-            prefix = "_guest_"
         tn = v[1:]
         ts = ""
         if ":" in v:
@@ -557,20 +537,27 @@ class QemuCommand(SubCommand):
                                  shell=True)
         if args.foreground:
             qemup.wait()
-        if args.wait_ssh:
+        connected = False
+        if args.wait_ssh or args.run_cmd:
             starttime = datetime.datetime.now()
             while (datetime.datetime.now() - starttime).total_seconds() < 120:
                 if qemup.poll() != None:
                     return 1
                 if ssh_call(self._sshport, "root", "true",
                             stderr=subprocess.PIPE) == 0:
-                    return 0
+                    connected = True
+                    break
                 time.sleep(0.5)
-            logging.error("Timeout while waiting for SSH server")
-            return 1
+            if not connected:
+                logging.error("Timeout while waiting for SSH server")
+                return 1
         else:
             # TODO: Wait for QMP or pidfile?
             time.sleep(0.5)
+        if args.run_cmd:
+            r = ssh_call(self._sshport, "root", args.run_cmd)
+            qemup.kill()
+            return r
         return 0
 
 class QMPCommand(SubCommand):
@@ -634,7 +621,19 @@ class SSHCommand(SubCommand):
         i = get_qemu_instance(args.name)
         return ssh_call(i.sshport, "root", *argv)
 
-class SSHCommand(SubCommand):
+class ListCommand(SubCommand):
+    name = "list"
+    want_argv = True
+    help = "List managed QEMU instances"
+
+    def args(self, parser):
+        pass
+
+    def do(self, args, argv):
+        for i in get_all_qemu_instances():
+            print(i.name)
+
+class SSHCopyIdCommand(SubCommand):
     name = "ssh-copy-id"
     want_argv = False
     help = "Execute ssh-copy-id command"
@@ -710,28 +709,6 @@ class BuildCommand(SubCommand):
         parser.add_argument("-D", "--no-debug", action="store_true",
                             help="Don't use --enable-debug")
 
-    def _sensible_configure_args(self, cwd):
-        ret = []
-        if "qemu-rhel7" in cwd:
-            ret.append("--extra-cflags=-Wno-error=deprecated-declarations")
-            ret.append("--extra-cflags=-Wno-error=int-in-bool-context")
-            ret.append("--extra-cflags=-Wno-error=maybe-uninitialized")
-            ret.append("--extra-cflags=-Wno-error=unused-const-variable")
-            # Spice has "header deprecated" error
-            ret.append("--disable-spice")
-            ret.append("--disable-fdt")
-            if "gcc version 6" in str(subprocess.check_output("cc -v 2>&1", shell=True)):
-                ret.append("--extra-cflags=-Wno-error=unused-const-variable")
-            ret.append("--extra-cflags=-Wno-error=nested-externs")
-        elif "qemu-rhev7" in cwd:
-            ret.append("--extra-cflags=-Wno-error=unused-const-variable")
-            ret.append("--extra-cflags=-Wno-error=stringop-truncation")
-        if subprocess.getoutput("git-branch-name").startswith("rhev7.2"):
-            ret.append("--extra-cflags=-Wno-error=deprecated-declarations")
-        #ret.append("--extra-cflags=-Wno-error=format-truncation")
-
-        return ret
-
     def do(self, args, argv):
         build_dir = os.path.join(Q_RUNDIR, "build")
         cwd = os.path.realpath(os.getcwd())
@@ -760,7 +737,7 @@ class BuildCommand(SubCommand):
             logging.debug("Configuring...")
             cfg_cmd = [os.path.join(cwd, "configure"),
                        "--prefix=" + prefix] + \
-                      configure_opts + self._sensible_configure_args(cwd) + argv
+                      configure_opts + argv
             if args.target_list:
                 cfg_cmd += ["--target-list=" + args.target_list]
             print_cmd(cfg_cmd)
@@ -806,33 +783,45 @@ class VMCreateCommand(SubCommand):
         parser.add_argument("-f", "--flavor", default="ubuntu",
                             help="Guest VM flavor to create. "
                                  "Supported: fedora")
+        parser.add_argument("--force", "-F", action="store_true",
+                            help="Force overwrite the image")
         parser.add_argument("image", help="Image file")
 
-    def _create_ubuntu(self, args):
-        cloudimg = os.path.join(self._cache_dir, "ubuntu2004.img")
+    def _create_image(self, flavor, url, args):
+        cloudimg = os.path.join(self._cache_dir, flavor + ".img")
         if not os.path.exists(cloudimg):
             cloudimg_tmp = cloudimg + ".tmp"
-            subprocess.check_call(["wget",
-                "-O", cloudimg_tmp,
-                "https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img",
-                ])
+            subprocess.check_call(["wget", "-O", cloudimg_tmp, url])
             subprocess.check_call(["mv", cloudimg_tmp, cloudimg])
         subprocess.check_call(["cp", cloudimg, args.image])
         subprocess.check_call(["qemu-img", 'resize', args.image, '10G'])
         # reinstal openssh server to generate host keys
         subprocess.check_call(['virt-customize',
-            '--uninstall', 'cloud-init,openssh-server',
-            '--install', 'dhcpcd5,openssh-server',
+            '--run-command', '/bin/bash /bin/growpart /dev/sda 1',
+            '--run-command', 'resize2fs /dev/sda1',
+            '--uninstall', 'openssh-server',
+            '--install', 'openssh-server',
             '--root-password', 'password:testpass',
             '--ssh-inject', 'root',
             '-a', args.image])
 
     def do(self, args, argv):
         self._cache_dir = os.path.join(Q_RUNDIR, ".vmcreate")
+        if os.path.exists(args.image) and not args.force:
+            logging.error("File %s exists but --force is not specified" % args.image)
+            return 1
         if not os.path.exists(self._cache_dir):
             os.makedirs(self._cache_dir)
         if args.flavor in ['ubuntu', 'ubuntu2004']:
-            return self._create_ubuntu(args)
+            url = "https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img"
+            self._create_image('ubuntu', url, args)
+            subprocess.check_call(['virt-customize',
+                '--uninstall', 'cloud-init,snap',
+                '--install', 'dhcpcd5',
+                '-a', args.image])
+        if args.flavor in ['buster']:
+            url = 'https://cloud.debian.org/images/cloud/buster/20210329-591/debian-10-generic-amd64-20210329-591.qcow2'
+            self._create_image('buster', url, args)
         else:
             logging.error("Unknown flavor: %s" % args.flavor)
             return 1
