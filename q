@@ -794,13 +794,12 @@ class VMCreateCommand(SubCommand):
             subprocess.check_call(["wget", "-O", cloudimg_tmp, url])
             subprocess.check_call(["mv", cloudimg_tmp, cloudimg])
         subprocess.check_call(["cp", cloudimg, args.image])
-        subprocess.check_call(["qemu-img", 'resize', args.image, '10G'])
-        # reinstal openssh server to generate host keys
+        subprocess.check_call(["qemu-img", 'resize', args.image, '50G'])
         subprocess.check_call(['virt-customize',
             '--run-command', '/bin/bash /bin/growpart /dev/sda 1',
-            '--run-command', 'resize2fs /dev/sda1',
-            '--uninstall', 'openssh-server',
-            '--install', 'openssh-server',
+            '--run-command', 'resize2fs /dev/sda1 || xfs_growfs /dev/sda1',
+            '--run-command', 'ssh-keygen -A',
+            '--run-command', 'echo SELINUX=disabled > /etc/selinux/config || true',
             '--root-password', 'password:testpass',
             '--ssh-inject', 'root',
             '-a', args.image])
@@ -822,6 +821,12 @@ class VMCreateCommand(SubCommand):
         if args.flavor in ['buster']:
             url = 'https://cloud.debian.org/images/cloud/buster/20210329-591/debian-10-generic-amd64-20210329-591.qcow2'
             self._create_image('buster', url, args)
+        if args.flavor in ['stretch']:
+            url = "https://cloud.debian.org/images/cloud/buster/latest/debian-10-generic-amd64.qcow2"
+            self._create_image('buster', url, args)
+        if args.flavor in ['centos']:
+            url = "https://cloud.centos.org/centos/8/x86_64/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2"
+            self._create_image('centos', url, args)
         else:
             logging.error("Unknown flavor: %s" % args.flavor)
             return 1
