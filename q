@@ -552,6 +552,9 @@ class QemuCommand(SubCommand):
                     break
                 time.sleep(0.5)
             if not connected:
+                sf = getattr(self, 'serial')
+                if sf and sf.startswith(self._rundir):
+                    subprocess.call(['cat', sf])
                 logging.error("Timeout while waiting for SSH server")
                 return 1
         else:
