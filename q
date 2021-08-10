@@ -543,7 +543,8 @@ class QemuCommand(SubCommand):
         connected = False
         if args.wait_ssh or args.run_cmd:
             starttime = datetime.datetime.now()
-            while (datetime.datetime.now() - starttime).total_seconds() < 120:
+            timeout = 60
+            while (datetime.datetime.now() - starttime).total_seconds() < timeout:
                 if qemup.poll() != None:
                     return 1
                 if ssh_call(self._sshport, "root", "true",
