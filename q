@@ -504,6 +504,9 @@ class QemuCommand(SubCommand):
         r = []
         for v in argv:
             r = r + self._parse_one(v)
+        if '-serial' not in r:
+            self.serial = "file:" + os.path.join(self._rundir, 'serial.out')
+            r += ["-serial", self.serial]
         return r
 
     def _quote_cmd(self, cmd):
