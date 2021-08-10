@@ -788,11 +788,14 @@ class VMCreateCommand(SubCommand):
         parser.add_argument("image", help="Image file")
 
     def _create_image(self, flavor, url, args):
-        cloudimg = os.path.join(self._cache_dir, flavor + ".img")
-        if not os.path.exists(cloudimg):
-            cloudimg_tmp = cloudimg + ".tmp"
-            subprocess.check_call(["wget", "-O", cloudimg_tmp, url])
-            subprocess.check_call(["mv", cloudimg_tmp, cloudimg])
+        if os.path.exists(flavor):
+            cloudimg = flavor
+        else:
+            cloudimg = os.path.join(self._cache_dir, flavor + ".img")
+            if not os.path.exists(cloudimg):
+                cloudimg_tmp = cloudimg + ".tmp"
+                subprocess.check_call(["wget", "-O", cloudimg_tmp, url])
+                subprocess.check_call(["mv", cloudimg_tmp, cloudimg])
         subprocess.check_call(["cp", cloudimg, args.image])
         subprocess.check_call(["qemu-img", 'resize', args.image, '50G'])
         subprocess.check_call(['virt-customize',
@@ -821,15 +824,14 @@ class VMCreateCommand(SubCommand):
         if args.flavor in ['buster']:
             url = 'https://cloud.debian.org/images/cloud/buster/20210329-591/debian-10-generic-amd64-20210329-591.qcow2'
             self._create_image('buster', url, args)
-        if args.flavor in ['stretch']:
+        elif args.flavor in ['stretch']:
             url = "https://cloud.debian.org/images/cloud/buster/latest/debian-10-generic-amd64.qcow2"
             self._create_image('buster', url, args)
-        if args.flavor in ['centos']:
+        elif args.flavor in ['centos']:
             url = "https://cloud.centos.org/centos/8/x86_64/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2"
             self._create_image('centos', url, args)
         else:
-            logging.error("Unknown flavor: %s" % args.flavor)
-            return 1
+            self._create_image(args.flavor, None, args)
 
 def global_args(parser):
     parser.add_argument("-D", "--debug", action="store_true",
