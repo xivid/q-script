@@ -792,9 +792,11 @@ class VMCreateCommand(SubCommand):
                                  "Supported: fedora")
         parser.add_argument("--force", "-F", action="store_true",
                             help="Force overwrite the image")
+        parser.add_argument("--install", "-i", default="",
+                            help="Install extra packages")
         parser.add_argument("image", help="Image file")
 
-    def _create_image(self, flavor, url, args):
+    def _create_image(self, flavor, url, args, virt_customize_args=[]):
         if os.path.exists(flavor):
             cloudimg = flavor
         else:
@@ -810,9 +812,10 @@ class VMCreateCommand(SubCommand):
             '--run-command', 'resize2fs /dev/sda1 || xfs_growfs /dev/sda1',
             '--run-command', 'ssh-keygen -A',
             '--run-command', 'echo SELINUX=disabled > /etc/selinux/config || true',
+            '--install', 'dhcpcd5,' + args.install,
             '--root-password', 'password:testpass',
             '--ssh-inject', 'root',
-            '-a', args.image])
+            '-a', args.image] + virt_customize_args)
 
     def do(self, args, argv):
         self._cache_dir = os.path.join(Q_RUNDIR, ".vmcreate")
@@ -823,12 +826,8 @@ class VMCreateCommand(SubCommand):
             os.makedirs(self._cache_dir)
         if args.flavor in ['ubuntu', 'ubuntu2004']:
             url = "https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img"
-            self._create_image('ubuntu', url, args)
-            subprocess.check_call(['virt-customize',
-                '--uninstall', 'cloud-init,snap',
-                '--install', 'dhcpcd5',
-                '-a', args.image])
-        if args.flavor in ['buster']:
+            self._create_image('ubuntu', url, args, ['--uninstall', 'cloud-init,snap'])
+        elif args.flavor in ['buster']:
             url = 'https://cloud.debian.org/images/cloud/buster/20210329-591/debian-10-generic-amd64-20210329-591.qcow2'
             self._create_image('buster', url, args)
         elif args.flavor in ['stretch']:
