@@ -354,6 +354,8 @@ class QemuCommand(SubCommand):
                             help="Which qemu executable to use")
         parser.add_argument("--no-net", action="store_true",
                             help="Don't add network")
+        parser.add_argument("--nic", default="virtio-net-pci",
+                            help="NIC type")
         parser.add_argument("--wait-ssh", "-w", action="store_true",
                             help="Wait for guest SSH service to start")
         parser.add_argument("--run-cmd", "-c",
@@ -377,7 +379,7 @@ class QemuCommand(SubCommand):
         # TODO: fix 10022 to a dynamic port
         if not args.no_net:
             ret += ["-netdev", "user,id=vnet,net=%s,host=%s,hostfwd=:0.0.0.0:%d-:22" % (args.net, args.host, self._sshport),
-                    "-device", "virtio-net-pci,netdev=vnet,mac=00:8c:fa:e4:a3:53"]
+                    "-device", args.nic + ",netdev=vnet,mac=00:8c:fa:e4:a3:53"]
 
         return ret;
 
