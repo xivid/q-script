@@ -814,6 +814,17 @@ class VMCreateCommand(SubCommand):
             '--run-command', 'resize2fs /dev/sda1 || xfs_growfs /dev/sda1',
             '--run-command', 'ssh-keygen -A',
             '--run-command', 'echo SELINUX=disabled > /etc/selinux/config || true',
+            '--run-command', """
+                for tty in tty0 ttyS0; do
+                    mkdir -p /etc/systemd/system/serial-getty@$tty.service.d/ &&
+                    cd /etc/systemd/system/serial-getty@$tty.service.d/ &&
+                    (
+                        echo [Service] &&
+                        echo ExecStart= &&
+                        echo 'ExecStart=-/sbin/agetty --autologin root %I $TERM'
+                    ) > override.conf
+                done
+            """,
             '--install', 'dhcpcd5,' + args.install,
             '--root-password', 'password:testpass',
             '--ssh-inject', 'root',
