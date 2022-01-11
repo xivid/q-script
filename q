@@ -783,6 +783,25 @@ class IotestsCommand(SubCommand):
             check_call(["./check"] + argv,
                        cwd=os.path.join(build_dir, "tests", "qemu-iotests"))
 
+class VMGrowCommand(SubCommand):
+    name = "vmgrow"
+    want_argv = False
+    help = "Grow guest image"
+
+    growcmds = [
+        '--run-command', '/bin/bash /bin/growpart /dev/sda 1',
+        '--run-command', 'resize2fs /dev/sda1 || xfs_growfs /dev/sda1',
+    ]
+
+    def args(self, parser):
+        parser.add_argument("image", help="Image file")
+        parser.add_argument("size", help="new size")
+
+    def do(self, args, argv):
+        subprocess.check_call(["qemu-img", 'resize', args.image, args.size])
+        subprocess.check_call(['virt-customize'] + self.growcmds + [
+            '-a', args.image])
+
 class VMCreateCommand(SubCommand):
     name = "vmcreate"
     want_argv = False
@@ -796,6 +815,8 @@ class VMCreateCommand(SubCommand):
                             help="Force overwrite the image")
         parser.add_argument("--install", "-i", default="",
                             help="Install extra packages")
+        parser.add_argument("--size", "-s", default="10G",
+                            help="virtual size of the image. Specifying as 0 disables resize")
         parser.add_argument("image", help="Image file")
 
     def _create_image(self, flavor, url, args, virt_customize_args=[]):
@@ -808,10 +829,12 @@ class VMCreateCommand(SubCommand):
                 subprocess.check_call(["wget", "-O", cloudimg_tmp, url])
                 subprocess.check_call(["mv", cloudimg_tmp, cloudimg])
         subprocess.check_call(["cp", cloudimg, args.image])
-        subprocess.check_call(["qemu-img", 'resize', args.image, '50G'])
-        subprocess.check_call(['virt-customize',
-            '--run-command', '/bin/bash /bin/growpart /dev/sda 1',
-            '--run-command', 'resize2fs /dev/sda1 || xfs_growfs /dev/sda1',
+        if args.size != "0":
+            subprocess.check_call(["qemu-img", 'resize', args.image, args.size])
+            growcmds = VMGrowCommand.grow_cmds
+        else:
+            growcmds = []
+        subprocess.check_call(['virt-customize'] + growcmds + [
             '--run-command', 'ssh-keygen -A',
             '--run-command', 'echo SELINUX=disabled > /etc/selinux/config || true',
             '--run-command', """
