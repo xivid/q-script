@@ -35,6 +35,7 @@ import random
 import time
 import datetime
 import hashlib
+import re
 
 ####### QMP module #######
 import errno
@@ -877,6 +878,65 @@ class VMCreateCommand(SubCommand):
             self._create_image('centos', url, args)
         else:
             self._create_image(args.flavor, None, args)
+
+class PatchFilter(object):
+    def __init__(self):
+        self.prev_line = ""
+
+    def filter(self, line):
+        orig_line = line
+        if self.prev_line == "--" and re.match("[0-9]*\.[0-9]*\.[0-9]*$", line):
+            line = ""
+        elif line.startswith("Subject: [PATCH"):
+            line = "Subject: [PATCH XXX/XXX] " + line.split(" ", maxsplit=3)[3]
+        elif re.match("From [0-9a-f]* .*:", line):
+            line = "From XXXXXXXXXXXXXXXXXXXX"
+        elif re.match("index [0-9a-f]*\.\.[0-9a-f]* [0-7]*", line):
+            line = "index XXXXXXXXXXXX..XXXXXXXXXXXX XXXXXX"
+        elif re.match("@@ -[0-9]*,[0-9]* \+[0-9]*,[0-9]* @@", line):
+            line = "@@ -XXXX,XX +XXXX,XX @@ " + line.split("@@", maxsplit=2)[2]
+        self.prev_line = orig_line
+        return line
+
+class PatchFilterCommand(SubCommand):
+    name = "patch-filter"
+    want_argv = False
+    help = "Filter git patch and make it easier for branch comparison"
+
+    def args(self, parser):
+        pass
+
+    def do(self, args, argv):
+        f = PatchFilter()
+        for line in sys.stdin:
+            print(f.filter(line.strip()))
+
+class CompareBranchesCommand(SubCommand):
+    name = "cmp-branches"
+    want_argv = False
+    help = "Compare two branches"
+
+    def args(self, parser):
+        parser.add_argument("left", type=str, help="Left branch")
+        parser.add_argument("right", type=str, help="Right branch")
+        parser.add_argument("--num-commits", "-n", type=int, help="Number of commits to compare")
+
+    def do(self, args, argv):
+        left = self.get_filterd_git_log(args.left, args.num_commits)
+        right = self.get_filterd_git_log(args.right, args.num_commits)
+        self.do_compare(left.name, right.name)
+
+    def get_filterd_git_log(self, ref, n):
+        f = tempfile.NamedTemporaryFile(suffix="-%s.patch" % ref, dir="/var/tmp", mode='w')
+        f = PatchFilter()
+        for line in subprocess.check_output(['git', 'format-patch', 'HEAD~%d..' % n,
+            '--stdout', ref], encoding='utf-8').splitlines():
+            f.write(f.filter(line) + "\n")
+        f.flush()
+        return f
+
+    def do_compare(self, left, right):
+        subprocess.call(['vimdiff', left, right])
 
 def global_args(parser):
     parser.add_argument("-D", "--debug", action="store_true",
