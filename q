@@ -868,7 +868,10 @@ class VMCreateCommand(SubCommand):
             self._create_image('buster', url, args)
         elif args.flavor in ['stretch']:
             url = "https://cloud.debian.org/images/cloud/buster/latest/debian-10-generic-amd64.qcow2"
-            self._create_image('buster', url, args)
+            self._create_image('stretch', url, args)
+        elif args.flavor in ['jessie']:
+            url = "http://cdimage.debian.org/cdimage/openstack/archive/8.0.0/debian-8.0.0-openstack-amd64.qcow2"
+            self._create_image('jessie', url, args)
         elif args.flavor in ['centos']:
             url = "https://cloud.centos.org/centos/8/x86_64/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2"
             self._create_image('centos', url, args)
