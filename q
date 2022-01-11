@@ -832,7 +832,7 @@ class VMCreateCommand(SubCommand):
         subprocess.check_call(["cp", cloudimg, args.image])
         if args.size != "0":
             subprocess.check_call(["qemu-img", 'resize', args.image, args.size])
-            growcmds = VMGrowCommand.grow_cmds
+            growcmds = VMGrowCommand.growcmds
         else:
             growcmds = []
         subprocess.check_call(['virt-customize'] + growcmds + [
