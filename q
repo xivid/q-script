@@ -431,7 +431,7 @@ class QemuCommand(SubCommand):
             opts += ["-device", "virtio-scsi-pci,id=scsi0"]
             self._has_scsi_bus = True
         drive, r = self._gen_drive(s)
-        return opts + r + ["-device", "scsi-disk,bus=scsi0.0,drive=%s,bootindex=1" % drive]
+        return opts + r + ["-device", "scsi-hd,bus=scsi0.0,drive=%s,bootindex=1" % drive]
 
     def _devtmpl_sd(self, s):
         opts = []
@@ -439,7 +439,7 @@ class QemuCommand(SubCommand):
             opts += ["-device", "virtio-scsi-pci,id=scsi0"]
             self._has_scsi_bus = True
         drive, r = self._gen_drive(s)
-        return opts + r + ["-device", "scsi-disk,bus=scsi0.0,id=%s,drive=%s" % (drive + "-sd", drive)]
+        return opts + r + ["-device", "scsi-hd,bus=scsi0.0,id=%s,drive=%s" % (drive + "-sd", drive)]
 
     def _devtmpl_sg(self, s):
         opts = []
