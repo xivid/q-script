@@ -820,7 +820,7 @@ class VMCreateCommand(SubCommand):
                             help="virtual size of the image. Specifying as 0 disables resize")
         parser.add_argument("image", help="Image file")
 
-    def _create_image(self, flavor, url, args, virt_customize_args=[]):
+    def _create_image(self, flavor, url, args, virt_customize_args=[], install_pkgs=[]):
         if os.path.exists(flavor):
             cloudimg = flavor
         else:
@@ -835,6 +835,12 @@ class VMCreateCommand(SubCommand):
             growcmds = VMGrowCommand.growcmds
         else:
             growcmds = []
+        if args.install:
+            install_pkgs += [x.strip() for x in args.install.split(',')]
+        if install_pkgs:
+            install_args = ['--install', ','.join(install_pkgs)]
+        else:
+            install_args = []
         subprocess.check_call(['virt-customize'] + growcmds + [
             '--run-command', 'ssh-keygen -A',
             '--run-command', 'echo SELINUX=disabled > /etc/selinux/config || true',
@@ -848,8 +854,7 @@ class VMCreateCommand(SubCommand):
                         echo 'ExecStart=-/sbin/agetty --autologin root %I $TERM'
                     ) > override.conf
                 done
-            """,
-            '--install', 'dhcpcd5,' + args.install,
+            """] + install_args + [
             '--root-password', 'password:testpass',
             '--ssh-inject', 'root',
             '-a', args.image] + virt_customize_args)
@@ -863,7 +868,7 @@ class VMCreateCommand(SubCommand):
             os.makedirs(self._cache_dir)
         if args.flavor in ['ubuntu', 'ubuntu2004']:
             url = "https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img"
-            self._create_image('ubuntu', url, args, ['--uninstall', 'cloud-init,snap'])
+            self._create_image('ubuntu', url, args, ['--uninstall', 'cloud-init,snap'], ['dhcpcd5'])
         elif args.flavor in ['buster']:
             url = 'https://cloud.debian.org/images/cloud/buster/20210329-591/debian-10-generic-amd64-20210329-591.qcow2'
             self._create_image('buster', url, args)
@@ -873,7 +878,10 @@ class VMCreateCommand(SubCommand):
         elif args.flavor in ['jessie']:
             url = "http://cdimage.debian.org/cdimage/openstack/archive/8.0.0/debian-8.0.0-openstack-amd64.qcow2"
             self._create_image('jessie', url, args)
-        elif args.flavor in ['centos']:
+        elif args.flavor in ['centos', 'centos7']:
+            url = "https://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-2111.qcow2"
+            self._create_image('centos', url, args)
+        elif args.flavor in ['centos8']:
             url = "https://cloud.centos.org/centos/8/x86_64/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2"
             self._create_image('centos', url, args)
         else:
