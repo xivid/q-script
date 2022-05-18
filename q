@@ -371,7 +371,7 @@ class QemuCommand(SubCommand):
 
     def _def_args(self, args):
         self._sshport = find_port(10022)
-        ret = ["-enable-kvm",]
+        ret = ["-enable-kvm", '-cpu', 'max']
         ret += ["-m", args.memory]
         ret += ["-qmp", "unix:%s,server,nowait" % self._rundir_filename("qmp")]
         ret += ["-name", self.name]
