@@ -345,7 +345,7 @@ class QemuCommand(SubCommand):
     def args(self, parser):
         parser.add_argument("--dry-run", action="store_true",
                             help="Only print the command line")
-        parser.add_argument("--memory", type=str, default="1G",
+        parser.add_argument("--memory", type=str, default="2G",
                             help="memory size")
         parser.add_argument("--name", type=str,
                             help="name of the QEMU instance")
@@ -371,8 +371,9 @@ class QemuCommand(SubCommand):
 
     def _def_args(self, args):
         self._sshport = find_port(10022)
-        ret = ["-enable-kvm", '-cpu', 'max']
+        ret = ["-enable-kvm", '-cpu', 'max', '-machine', 'q35']
         ret += ["-m", args.memory]
+        ret += ["-smp", "4"]
         ret += ["-qmp", "unix:%s,server,nowait" % self._rundir_filename("qmp")]
         ret += ["-name", self.name]
         if not os.environ.get("DISPLAY"):
