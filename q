@@ -373,7 +373,7 @@ class QemuCommand(SubCommand):
         self._sshport = find_port(10022)
         ret = ["-enable-kvm", '-cpu', 'max', '-machine', 'q35']
         ret += ["-m", args.memory]
-        ret += ["-smp", "4"]
+        ret += ["-smp", "cores=4"]
         ret += ["-qmp", "unix:%s,server,nowait" % self._rundir_filename("qmp")]
         ret += ["-name", self.name]
         if not os.environ.get("DISPLAY"):
