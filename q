@@ -947,6 +947,43 @@ class CompareBranchesCommand(SubCommand):
     def do_compare(self, left, right):
         subprocess.call(['vimdiff', left, right])
 
+class FlamegraphCommand(SubCommand):
+    name = "flamegraph"
+    want_argv = True
+    help = "Collect a flamegraph"
+
+    flamegraph_dir = os.path.join(Q_RUNDIR, ".flamegraph")
+
+    def args(self, parser):
+        parser.add_argument("--output", "-o", required=True)
+
+    def fetch_flamegraph_maybe(self):
+        if not os.path.exists(self.flamegraph_dir):
+            check_call(["mkdir", "-p", Q_RUNDIR])
+            check_output(['git', 'clone', '--depth=1',
+                          'https://github.com/brendangregg/FlameGraph',
+                          self.flamegraph_dir])
+
+    def perf_record(self, argv):
+        td = tempfile.mkdtemp()
+        fn = td + "/perf.data"
+        check_call(['sudo', '-n', 'perf', 'record', '-a', '-g', '-o', fn] + argv)
+        return fn
+
+    def gen_flame_graph(self, perf_data, output):
+        cmd = "sudo -n perf script -i '%s' | %s/stackcollapse-perf.pl - > %s.stacks" % (
+                perf_data, perf_data, output)
+        check_output(cmd)
+
+        cmd = "%s/flamegraph.pl %s.stacks > %s" % (self.flamegraph_dir, perf_data, output)
+
+        check_output(cmd)
+
+    def do(self, args, argv):
+        self.fetch_flamegraph_maybe()
+        fn = self.perf_record(argv)
+        self.gen_flame_graph(fn, args.output)
+
 def global_args(parser):
     parser.add_argument("-D", "--debug", action="store_true",
                         help="Enable debug output")
