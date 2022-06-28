@@ -809,10 +809,29 @@ class VMCreateCommand(SubCommand):
     want_argv = False
     help = "Create VM guests"
 
+    flavors = {
+        'ubuntu': {
+            'image': "https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img",
+            'virt_customize_args': [
+                "--run-command", "touch .hushlogin",
+                "--uninstall", "snap,cloud-init",
+                "--install", "dhcpcd5",
+            ],
+        },
+        'buster': {
+            'image': 'https://cloud.debian.org/images/cloud/buster/20210329-591/debian-10-generic-amd64-20210329-591.qcow2',
+        },
+        'centos7': {
+            'image': 'https://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-2111.qcow2',
+        },
+        'centos8': {
+            'image': 'https://cloud.centos.org/centos/8/x86_64/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2',
+        }
+    }
+
     def args(self, parser):
         parser.add_argument("-f", "--flavor", default="ubuntu",
-                            help="Guest VM flavor to create. "
-                                 "Supported: fedora")
+                            help="Guest VM flavor to create. supported: %s" % (', '.join(self.flavors)))
         parser.add_argument("--force", "-F", action="store_true",
                             help="Force overwrite the image")
         parser.add_argument("--install", "-i", default="",
@@ -821,28 +840,25 @@ class VMCreateCommand(SubCommand):
                             help="virtual size of the image. Specifying as 0 disables resize")
         parser.add_argument("image", help="Image file")
 
-    def _create_image(self, flavor, url, args, virt_customize_args=[], install_pkgs=[]):
-        if os.path.exists(flavor):
-            cloudimg = flavor
-        else:
-            cloudimg = os.path.join(self._cache_dir, flavor + ".img")
-            if not os.path.exists(cloudimg):
-                cloudimg_tmp = cloudimg + ".tmp"
-                subprocess.check_call(["wget", "-O", cloudimg_tmp, url])
-                subprocess.check_call(["mv", cloudimg_tmp, cloudimg])
+    def create_image(self, flavor, url, args, virt_customize_args=[]):
+        cloudimg = os.path.join(self._cache_dir, flavor + ".img")
+        if not os.path.exists(cloudimg):
+            cloudimg_tmp = cloudimg + ".tmp"
+            subprocess.check_call(["wget", "-O", cloudimg_tmp, url])
+            subprocess.check_call(["mv", cloudimg_tmp, cloudimg])
         subprocess.check_call(["cp", cloudimg, args.image])
         if args.size != "0":
             subprocess.check_call(["qemu-img", 'resize', args.image, args.size])
             growcmds = VMGrowCommand.growcmds
         else:
             growcmds = []
+        install_pkgs = []
         if args.install:
-            install_pkgs += [x.strip() for x in args.install.split(',')]
+            install_pkgs = [x.strip() for x in args.install.split(',')]
         if install_pkgs:
-            install_args = ['--install', ','.join(install_pkgs)]
-        else:
-            install_args = []
-        subprocess.check_call(['virt-customize'] + growcmds + [
+            virt_customize_args += ['--install', ','.join(install_pkgs)]
+        cmd = ['virt-customize'] + growcmds + [
+            '--run-command', 'touch /root/.hushlogin',
             '--run-command', 'ssh-keygen -A',
             '--run-command', 'echo SELINUX=disabled > /etc/selinux/config || true',
             '--run-command', """
@@ -855,10 +871,12 @@ class VMCreateCommand(SubCommand):
                         echo 'ExecStart=-/sbin/agetty --autologin root %I $TERM'
                     ) > override.conf
                 done
-            """] + install_args + [
+            """] + virt_customize_args + [
             '--root-password', 'password:testpass',
             '--ssh-inject', 'root',
-            '-a', args.image] + virt_customize_args)
+            '-a', args.image]
+        print("\n".join(cmd))
+        subprocess.check_call(cmd)
 
     def do(self, args, argv):
         self._cache_dir = os.path.join(Q_RUNDIR, ".vmcreate")
@@ -867,26 +885,8 @@ class VMCreateCommand(SubCommand):
             return 1
         if not os.path.exists(self._cache_dir):
             os.makedirs(self._cache_dir)
-        if args.flavor in ['ubuntu', 'ubuntu2004']:
-            url = "https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img"
-            self._create_image('ubuntu', url, args, ['--uninstall', 'cloud-init,snap'], ['dhcpcd5'])
-        elif args.flavor in ['buster']:
-            url = 'https://cloud.debian.org/images/cloud/buster/20210329-591/debian-10-generic-amd64-20210329-591.qcow2'
-            self._create_image('buster', url, args)
-        elif args.flavor in ['stretch']:
-            url = "https://cloud.debian.org/images/cloud/buster/latest/debian-10-generic-amd64.qcow2"
-            self._create_image('stretch', url, args)
-        elif args.flavor in ['jessie']:
-            url = "http://cdimage.debian.org/cdimage/openstack/archive/8.0.0/debian-8.0.0-openstack-amd64.qcow2"
-            self._create_image('jessie', url, args)
-        elif args.flavor in ['centos', 'centos7']:
-            url = "https://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-2111.qcow2"
-            self._create_image('centos', url, args)
-        elif args.flavor in ['centos8']:
-            url = "https://cloud.centos.org/centos/8/x86_64/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2"
-            self._create_image('centos', url, args)
-        else:
-            self._create_image(args.flavor, None, args)
+        flavor = self.flavors[args.flavor]
+        self.create_image(args.flavor, flavor['image'], args, flavor.get("virt_customize_args"))
 
 class PatchFilter(object):
     def __init__(self):
