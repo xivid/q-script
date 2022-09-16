@@ -945,10 +945,10 @@ class CompareBranchesCommand(SubCommand):
 
     def get_filterd_git_log(self, ref, n):
         f = tempfile.NamedTemporaryFile(suffix="-%s.patch" % ref, dir="/var/tmp", mode='w')
-        f = PatchFilter()
+        pf = PatchFilter()
         for line in subprocess.check_output(['git', 'format-patch', 'HEAD~%d..' % n,
             '--stdout', ref], encoding='utf-8').splitlines():
-            f.write(f.filter(line) + "\n")
+            f.write(pf.filter(line) + "\n")
         f.flush()
         return f
 
