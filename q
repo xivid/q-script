@@ -867,7 +867,6 @@ class VMCreateCommand(SubCommand):
         if install_pkgs:
             virt_customize_args += ['--install', ','.join(install_pkgs)]
         cmd = ['virt-customize'] + growcmds + [
-            '--run-command', 'touch /root/.hushlogin',
             '--run-command', 'ssh-keygen -A',
             '--run-command', 'echo SELINUX=disabled > /etc/selinux/config || true',
             '--run-command', """
@@ -895,7 +894,7 @@ class VMCreateCommand(SubCommand):
         if not os.path.exists(self._cache_dir):
             os.makedirs(self._cache_dir)
         flavor = self.flavors[args.flavor]
-        self.create_image(args.flavor, flavor['image'], args, flavor.get("virt_customize_args"))
+        self.create_image(args.flavor, flavor['image'], args, flavor.get("virt_customize_args", []))
 
 class PatchFilter(object):
     def __init__(self):
