@@ -826,7 +826,13 @@ class VMCreateCommand(SubCommand):
         },
         'centos8': {
             'image': 'https://cloud.centos.org/centos/8/x86_64/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2',
-        }
+        },
+        'fedora': {
+            'image': 'https://download.fedoraproject.org/pub/fedora/linux/releases/36/Cloud/x86_64/images/Fedora-Cloud-Base-36-1.5.x86_64.raw.xz',
+            'virt_customize_args': [
+                "--install", "cloud-utils-growpart",
+            ],
+        },
     }
 
     def args(self, parser):
@@ -845,6 +851,9 @@ class VMCreateCommand(SubCommand):
         if not os.path.exists(cloudimg):
             cloudimg_tmp = cloudimg + ".tmp"
             subprocess.check_call(["wget", "-O", cloudimg_tmp, url])
+            if url.endswith(".xz"):
+                subprocess.check_call(["mv", cloudimg_tmp, cloudimg_tmp + ".xz"])
+                subprocess.check_call(["unxz", cloudimg_tmp + ".xz"])
             subprocess.check_call(["mv", cloudimg_tmp, cloudimg])
         subprocess.check_call(["cp", cloudimg, args.image])
         if args.size != "0":
