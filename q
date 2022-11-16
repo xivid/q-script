@@ -324,15 +324,28 @@ def find_port(start):
         ret += 1
     return ret
 
+ssh_opts = [
+    "-o", "ConnectTimeout=1",
+    "-o", "UserKnownHostsFile=/dev/null",
+    "-o", "StrictHostKeyChecking=no",
+    ]
 def ssh_call(port, user, *argv, **kwargs):
-    return subprocess.call(["ssh",
-                            "-o", "ConnectTimeout=1",
-                            "-o", "UserKnownHostsFile=/dev/null",
-                            "-o", "StrictHostKeyChecking=no",
+    return subprocess.call(["ssh"] + ssh_opts + [
                             "-q",
                             "-p", str(port),
                             "%s@127.0.0.1" % user] + list(argv),
                             **kwargs)
+
+def scp_call(port, user, *argv, **kwargs):
+    scp_args = []
+    for a in argv:
+        if a.startswith("vm:"):
+            a = "%s@127.0.0.1" % user + a[2:]
+        scp_args.append(a)
+
+    cmd = ["scp"] + ssh_opts + [
+            "-q", "-P", str(port)] + scp_args
+    return subprocess.call(cmd, **kwargs)
 
 class QemuCommand(SubCommand):
     name = "qemu"
@@ -631,6 +644,18 @@ class SSHCommand(SubCommand):
     def do(self, args, argv):
         i = get_qemu_instance(args.name)
         return ssh_call(i.sshport, "root", *argv)
+
+class SCPCommand(SubCommand):
+    name = "scp"
+    want_argv = True
+    help = "Execute SSH command"
+
+    def args(self, parser):
+        parser.add_argument("--name", type=str, help="QEMU instance name")
+
+    def do(self, args, argv):
+        i = get_qemu_instance(args.name)
+        return scp_call(i.sshport, "root", *argv)
 
 class ListCommand(SubCommand):
     name = "list"
