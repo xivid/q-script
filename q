@@ -225,7 +225,7 @@ devnull = open("/dev/null")
 def get_nr_cores():
     return multiprocessing.cpu_count()
 
-Q_RUNDIR = os.path.expanduser("/var/tmp/q")
+Q_RUNDIR = os.path.expanduser("~/.cache/q-script")
 
 def check_output(cmd, *args, **kwargs):
     kwargs["shell"] = not isinstance(cmd, list)
