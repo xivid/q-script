@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Copyright 2012-2021 Fam Zheng <fam@euphon.net>
-Copyright 2021 Bytedance Inc.
+Copyright 2021-2022 Bytedance Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -36,6 +36,7 @@ import time
 import datetime
 import hashlib
 import re
+import atexit
 
 ####### QMP module #######
 import errno
@@ -557,6 +558,9 @@ class QemuCommand(SubCommand):
                                  shell=True)
         if args.foreground:
             qemup.wait()
+            return 0
+        if args.run_cmd:
+            atexit.register(lambda: do_hmp(args.name, 'q'))
         connected = False
         if args.wait_ssh or args.run_cmd:
             starttime = datetime.datetime.now()
@@ -580,7 +584,6 @@ class QemuCommand(SubCommand):
             time.sleep(0.5)
         if args.run_cmd:
             r = ssh_call(self._sshport, "root", args.run_cmd)
-            qemup.kill()
             return r
         return 0
 
@@ -681,6 +684,13 @@ class SSHCopyIdCommand(SubCommand):
         i = get_qemu_instance(args.name)
         return subprocess.call(["ssh-copy-id", "-p", str(i.sshport), "root@127.0.0.1"])
 
+def do_hmp(name, argv):
+    i = get_qemu_instance(name)
+    print(argv)
+    r = i.do_qmp('human-monitor-command',
+                 **{'command-line': " ".join(argv)})
+    print(r)
+
 class HMPCommand(SubCommand):
     name = "hmp"
     want_argv = True
@@ -689,11 +699,7 @@ class HMPCommand(SubCommand):
         parser.add_argument("--name", type=str, help="QEMU instance name")
 
     def do(self, args, argv):
-        i = get_qemu_instance(args.name)
-        print(argv)
-        r = i.do_qmp('human-monitor-command',
-                     **{'command-line': " ".join(argv)})
-        print(r)
+        do_hmp(args.name, argv)
         return 0
 
 class GDBCommand(SubCommand):
