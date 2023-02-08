@@ -1072,6 +1072,7 @@ class FlamegraphCommand(SubCommand):
 
     def args(self, parser):
         parser.add_argument("--output", "-o", required=True)
+        parser.add_argument("--data", "-d", type=str, help="perf data path")
 
     def fetch_flamegraph_maybe(self):
         if not os.path.exists(self.flamegraph_dir):
@@ -1088,7 +1089,7 @@ class FlamegraphCommand(SubCommand):
 
     def gen_flame_graph(self, perf_data, output):
         cmd = "sudo -n perf script -i '%s' | %s/stackcollapse-perf.pl - > %s.stacks" % (
-                perf_data, perf_data, output)
+                perf_data, self.flamegraph_dir, output)
         check_output(cmd)
 
         cmd = "%s/flamegraph.pl %s.stacks > %s" % (self.flamegraph_dir, perf_data, output)
@@ -1097,7 +1098,10 @@ class FlamegraphCommand(SubCommand):
 
     def do(self, args, argv):
         self.fetch_flamegraph_maybe()
-        fn = self.perf_record(argv)
+        if args.data:
+            fn = args.data
+        else:
+            fn = self.perf_record(argv)
         self.gen_flame_graph(fn, args.output)
 
 def global_args(parser):
