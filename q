@@ -835,6 +835,38 @@ class VMGrowCommand(SubCommand):
         subprocess.check_call(['virt-customize'] + self.growcmds + [
             '-a', args.image])
 
+ubuntu_user_data = """
+#cloud-config
+autoinstall:
+  version: 1
+  identity:
+    hostname: ubuntu-server
+    password: "$6$exDY1mhS4KUYCE/2$zmn9ToZwTKLhCw.b4/b.ZRTIZM30JZ4QrOQ2aOXJ8yk96xpcCof0kxKwuX1kqLG/ygbJ1f8wxED22bTL4F46P0"
+    username: ubuntu
+"""
+
+grub_cfg = """
+set timeout=3
+
+loadfont unicode
+
+set menu_color_normal=white/black
+set menu_color_highlight=black/light-gray
+
+menuentry "Try or Install Ubuntu Server" {
+    linux   /casper/vmlinuz autoinstall ds=nocloud;s=/cdrom/
+    initrd  /casper/initrd
+}
+"""
+
+isolinux_cfg = """
+default autoinstall-server
+label autoinstall-server
+  menu label ^Autoinstall Server (HWE Kernel, NVIDIA, NetworkManager)
+  kernel /casper/hwe-vmlinuz
+  append   initrd=/casper/hwe-initrd quiet autoinstall ds=nocloud;s=/cdrom/ ---
+"""
+
 class VMCreateCommand(SubCommand):
     name = "vmcreate"
     want_argv = False
@@ -842,7 +874,15 @@ class VMCreateCommand(SubCommand):
 
     flavors = {
         'ubuntu': {
-            'image': "https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img",
+            'url': "https://cloud-images.ubuntu.com/releases/jammy/release/ubuntu-22.04-server-cloudimg-amd64.img",
+            'virt_customize_args': [
+                "--run-command", "touch .hushlogin",
+                "--uninstall", "snap,cloud-init",
+                "--install", "dhcpcd5",
+            ],
+        },
+        'ubuntu-iso': {
+            'url': "https://cdimage.ubuntu.com/ubuntu-server/focal/daily-live/current/focal-live-server-amd64.iso",
             'virt_customize_args': [
                 "--run-command", "touch .hushlogin",
                 "--uninstall", "snap,cloud-init",
@@ -850,16 +890,16 @@ class VMCreateCommand(SubCommand):
             ],
         },
         'buster': {
-            'image': 'https://cloud.debian.org/images/cloud/buster/20210329-591/debian-10-generic-amd64-20210329-591.qcow2',
+            'url': 'https://cloud.debian.org/images/cloud/buster/20210329-591/debian-10-generic-amd64-20210329-591.qcow2',
         },
         'centos7': {
-            'image': 'https://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-2111.qcow2',
+            'url': 'https://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-2111.qcow2',
         },
         'centos8': {
-            'image': 'https://cloud.centos.org/centos/8/x86_64/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2',
+            'url': 'https://cloud.centos.org/centos/8/x86_64/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2',
         },
         'fedora': {
-            'image': 'https://download.fedoraproject.org/pub/fedora/linux/releases/36/Cloud/x86_64/images/Fedora-Cloud-Base-36-1.5.x86_64.raw.xz',
+            'url': 'https://download.fedoraproject.org/pub/fedora/linux/releases/36/Cloud/x86_64/images/Fedora-Cloud-Base-36-1.5.x86_64.raw.xz',
             'virt_customize_args': [
                 "--install", "cloud-utils-growpart",
             ],
@@ -877,7 +917,7 @@ class VMCreateCommand(SubCommand):
                             help="virtual size of the image. Specifying as 0 disables resize")
         parser.add_argument("image", help="Image file")
 
-    def create_image(self, flavor, url, args, virt_customize_args=[]):
+    def create_image_via_cloud_image(self, flavor, url, args, virt_customize_args=[]):
         cloudimg = os.path.join(self._cache_dir, flavor + ".img")
         if not os.path.exists(cloudimg):
             cloudimg_tmp = cloudimg + ".tmp"
@@ -917,6 +957,43 @@ class VMCreateCommand(SubCommand):
         print("\n".join(cmd))
         subprocess.check_call(cmd)
 
+    def create_image_via_ubuntu_iso(self, flavor, url, args, virt_customize_args=[]):
+        iso = os.path.join(self._cache_dir, flavor + ".iso")
+        uiso = os.path.join(self._cache_dir, flavor + "-unattended.iso")
+        if not os.path.exists(iso):
+            iso_tmp = iso + ".tmp"
+            subprocess.check_call(["wget", "-O", iso_tmp, url])
+            subprocess.check_call(["mv", iso_tmp, iso])
+        tmpd = tempfile.mkdtemp()
+        atexit.register(lambda: shutil.rmtree(tmpd))
+        print(tmpd)
+        subprocess.check_output(['7z', 'x', iso], cwd=tmpd)
+        if False:
+            with open(os.path.join(tmpd, 'meta-data'), 'w') as f:
+                f.write(ubuntu_user_data)
+            with open(os.path.join(tmpd, 'boot/grub/grub.cfg'), 'w') as f:
+                f.write(grub_cfg)
+            with open(os.path.join(tmpd, 'isolinux/txt.cfg'), 'w') as f:
+                f.write(isolinux_cfg)
+        cmd = f"""
+        # echo > md5sum.txt;
+        genisoimage -quiet -D -r -V "ubuntu-autoinstall" \
+                -cache-inodes -J -l -joliet-long \
+                -b isolinux/isolinux.bin -c isolinux/boot.cat \
+                -no-emul-boot -boot-load-size 4 \
+                -boot-info-table -eltorito-alt-boot -e boot/grub/efi.img \
+                -no-emul-boot -o {uiso} .
+                """
+        subprocess.check_call(cmd, cwd=tmpd, shell=True)
+        print(uiso)
+        subprocess.check_output(f"q q +vblk:test.img -cdrom {uiso}", shell=True)
+
+    def create_image(self, flavor, url, args, virt_customize_args=[]):
+        if url.endswith(".iso"):
+            return self.create_image_via_ubuntu_iso(flavor, url, args, virt_customize_args)
+        else:
+            return self.create_image_via_cloud_image(flavor, url, args, virt_customize_args)
+
     def do(self, args, argv):
         self._cache_dir = os.path.join(Q_RUNDIR, ".vmcreate")
         if os.path.exists(args.image) and not args.force:
@@ -925,7 +1002,7 @@ class VMCreateCommand(SubCommand):
         if not os.path.exists(self._cache_dir):
             os.makedirs(self._cache_dir)
         flavor = self.flavors[args.flavor]
-        self.create_image(args.flavor, flavor['image'], args, flavor.get("virt_customize_args", []))
+        self.create_image(args.flavor, flavor['url'], args, flavor.get("virt_customize_args", []))
 
 class PatchFilter(object):
     def __init__(self):
