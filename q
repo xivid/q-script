@@ -922,6 +922,20 @@ class VMCreateCommand(SubCommand):
                 "--install", "cloud-utils-growpart",
             ],
         },
+        'phoronix-test-suite': {
+            'url': "https://cloud-images.ubuntu.com/releases/jammy/release/ubuntu-22.04-server-cloudimg-amd64.img",
+            'virt_customize_args': [
+                "--run-command", "touch .hushlogin",
+                "--uninstall", "snap,cloud-init",
+                "--install", "unzip,dhcpcd5",
+                "--run-command", """
+                set -e
+                wget https://phoronix-test-suite.com/releases/repo/pts.debian/files/phoronix-test-suite_10.8.4_all.deb -O pts.deb
+                DEBIAN_FRONTEND=noninteractive apt install -y ./pts.deb
+                rm pts.deb
+                """
+            ],
+        },
     }
 
     def args(self, parser):
