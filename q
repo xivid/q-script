@@ -348,6 +348,20 @@ def scp_call(port, user, *argv, **kwargs):
             "-q", "-P", str(port)] + scp_args
     return subprocess.call(cmd, **kwargs)
 
+def get_default_mem():
+    avail = subprocess.check_output("free -m", shell=True, encoding='utf-8').splitlines()[1].split()[6]
+    avail = int(avail) / 1000
+    if avail > 16:
+        return '10G'
+    if avail > 10:
+        return '8G'
+    if avail > 6:
+        return '4G'
+    if avail > 3:
+        return '2G'
+    else:
+        return '1G'
+
 class QemuCommand(SubCommand):
     name = "qemu"
     aliases = ["q"]
@@ -359,7 +373,7 @@ class QemuCommand(SubCommand):
     def args(self, parser):
         parser.add_argument("--dry-run", action="store_true",
                             help="Only print the command line")
-        parser.add_argument("--memory", type=str, default="2G",
+        parser.add_argument("--memory", type=str, default=get_default_mem(),
                             help="memory size")
         parser.add_argument("--name", type=str,
                             help="name of the QEMU instance")
@@ -383,11 +397,13 @@ class QemuCommand(SubCommand):
     def _rundir_filename(self, fn):
         return os.path.join(self._rundir, fn)
 
-    def _def_args(self, args):
+    def _def_args(self, args, argv):
         self._sshport = find_port(10022)
         ret = ["-enable-kvm", '-cpu', 'max', '-machine', 'q35']
-        ret += ["-m", args.memory]
-        ret += ["-smp", "cores=4"]
+        if '-m' not in argv:
+            ret += ["-m", args.memory]
+        if '-smp' not in argv:
+            ret += ["-smp", "cores=4"]
         ret += ["-qmp", "unix:%s,server,nowait" % self._rundir_filename("qmp")]
         ret += ["-name", self.name]
         if not os.environ.get("DISPLAY"):
@@ -546,7 +562,7 @@ class QemuCommand(SubCommand):
         self._rundir = os.path.join(Q_RUNDIR, "qemu-" + self.name)
         check_call(["mkdir", "-p", self._rundir])
 
-        cmd = args.program.split() + self._def_args(args) + self._parse_argv(argv)
+        cmd = args.program.split() + self._def_args(args, argv) + self._parse_argv(argv)
         cmd += ["-pidfile", os.path.join(self._rundir, "pid")]
         print_cmd(cmd)
         if args.dry_run:
@@ -584,6 +600,8 @@ class QemuCommand(SubCommand):
             time.sleep(0.5)
         if args.run_cmd:
             r = ssh_call(self._sshport, "root", args.run_cmd)
+            qemup.kill()
+            qemup.wait()
             return r
         return 0
 
