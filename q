@@ -795,6 +795,7 @@ class FioCommand(SubCommand):
         parser.add_argument("-s", "--size", default='10g')
         parser.add_argument("-b", "--bs", default='4k')
         parser.add_argument("-q", "--iodepth", default='1')
+        parser.add_argument("-f", "--testfile")
 
     def do(self, args, argv):
         configs = []
@@ -806,15 +807,17 @@ class FioCommand(SubCommand):
                         'iodepth': int(iodepth),
                     }
                 )
-        with tempfile.NamedTemporaryFile() as testfile:
-            for c in configs:
-                cfg = self.cfg_template.format(
-                        size=args.size,
-                        runtime=args.runtime,
-                        testfile=testfile.name,
-                        **c)
-                r = self.do_fio(cfg)
-                self.show_result(r)
+        tmpd = tempfile.mkdtemp(dir='.')
+        atexit.register(lambda: shutil.rmtree(tmpd))
+        tf = args.testfile or os.path.join(tmpd, 'testfile')
+        for c in configs:
+            cfg = self.cfg_template.format(
+                    size=args.size,
+                    runtime=args.runtime,
+                    testfile=tf,
+                    **c)
+            r = self.do_fio(cfg)
+            self.show_result(r)
 
     def show_result(self, r):
         for job in r['jobs']:
