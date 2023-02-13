@@ -807,10 +807,11 @@ class FioCommand(SubCommand):
                         'iodepth': int(iodepth),
                     }
                 )
-        tmpd = tempfile.mkdtemp(dir='.')
+        tmpd = tempfile.mkdtemp(dir='.', prefix="q-fio")
         atexit.register(lambda: shutil.rmtree(tmpd))
         tf = args.testfile or os.path.join(tmpd, 'testfile')
         for c in configs:
+            self.show_cfg(c)
             cfg = self.cfg_template.format(
                     size=args.size,
                     runtime=args.runtime,
@@ -831,8 +832,13 @@ class FioCommand(SubCommand):
                     iops=int(iops))
             print(x)
 
+    def show_cfg(self, cfg):
+        print("\n=== Testing bs={bs} iodepth={iodepth}===".format(
+            bs=cfg['bs'],
+            iodepth=cfg['iodepth']
+            ))
     def do_fio(self, cfg):
-        cf = tempfile.NamedTemporaryFile(suffix=".fio", mode="w", delete=False)
+        cf = tempfile.NamedTemporaryFile(prefix="q-fio-", suffix=".fio", mode="w", delete=False)
         cf.write(cfg)
         cf.flush()
         cmd = ['fio', '--output-format=json', cf.name]
