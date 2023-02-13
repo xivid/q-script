@@ -1064,6 +1064,7 @@ class VMCreateCommand(SubCommand):
         cmd = ['virt-customize'] + growcmds + [
             '--run-command', 'ssh-keygen -A',
             '--run-command', 'echo SELINUX=disabled > /etc/selinux/config || true',
+            '--copy-in', sys.argv[0] + ':/usr/local/bin',
             '--run-command', """
                 for tty in tty0 ttyS0; do
                     mkdir -p /etc/systemd/system/serial-getty@$tty.service.d/ &&
