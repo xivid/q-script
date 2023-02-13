@@ -754,6 +754,89 @@ class MakeCommand(SubCommand):
         nr_cores = get_nr_cores()
         check_call(["make", "-C", build_dir, "-j", str(nr_cores)] + argv)
 
+class FioCommand(SubCommand):
+    name = "fio"
+    want_argv = True
+    help = "Benchmark SSD/NVMe performance using fio"
+
+    cfg_template = """
+    [global]
+    bs={bs}
+    ioengine=libaio
+    iodepth={iodepth}
+    size={size}
+    direct=1
+    runtime={runtime}
+    filename={testfile}
+
+    [seq-read]
+    rw=read
+    stonewall
+
+    [rand-read]
+    rw=randread
+    stonewall
+
+    [seq-write]
+    rw=write
+    stonewall
+
+    [rand-write]
+    rw=randwrite
+    stonewall
+
+    [rand-rw]
+    rw=randrw
+    stonewall
+    """
+
+    def args(self, parser):
+        parser.add_argument("-t", "--runtime", type=int, default=30)
+        parser.add_argument("-s", "--size", default='10g')
+        parser.add_argument("-b", "--bs", default='4k')
+        parser.add_argument("-q", "--iodepth", default='1')
+
+    def do(self, args, argv):
+        configs = []
+        for bs in args.bs.split(','):
+            for iodepth in args.iodepth.split(','):
+                configs.append(
+                    {
+                        'bs': bs,
+                        'iodepth': int(iodepth),
+                    }
+                )
+        with tempfile.NamedTemporaryFile() as testfile:
+            for c in configs:
+                cfg = self.cfg_template.format(
+                        size=args.size,
+                        runtime=args.runtime,
+                        testfile=testfile.name,
+                        **c)
+                r = self.do_fio(cfg)
+                self.show_result(r)
+
+    def show_result(self, r):
+        for job in r['jobs']:
+            bw = job['read']['bw_bytes'] + job['write']['bw_bytes']
+            iops = job['read']['iops'] + job['write']['iops']
+            x = "{name: <18} {bw_mb: >10} MB/s, {iops: >10} iops, {rlat: >10}us r-lat, {wlat: >10}us w-lat".format(
+                    name=job['jobname'] + ":",
+                    bw_mb=bw >> 20,
+                    rlat=int(job['read']['lat_ns']['mean'] / 1000),
+                    wlat=int(job['write']['lat_ns']['mean'] / 1000),
+                    iops=int(iops))
+            print(x)
+
+    def do_fio(self, cfg):
+        cf = tempfile.NamedTemporaryFile(suffix=".fio", mode="w", delete=False)
+        cf.write(cfg)
+        cf.flush()
+        cmd = ['fio', '--output-format=json', cf.name]
+        print(' '.join(cmd))
+        r = subprocess.check_output(cmd, encoding='utf-8')
+        return json.loads(r)
+
 class BuildCommand(SubCommand):
     name = "build"
     aliases = ["b"]
