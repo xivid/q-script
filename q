@@ -402,6 +402,8 @@ class QemuCommand(SubCommand):
                             help="Wait for guest SSH service to start")
         parser.add_argument("--run-cmd", "-c",
                             help="Run command in guest and exit")
+        parser.add_argument("--no-shutdown", "-N",
+                            help="Don't shutdown after run-cmd is done")
         parser.add_argument("--net", default="10.0.2.0/24",
                             help="CIDR for the user net")
         parser.add_argument("--host", default="10.0.2.2",
@@ -596,7 +598,7 @@ class QemuCommand(SubCommand):
         if args.foreground:
             qemup.wait()
             return 0
-        if args.run_cmd:
+        if args.run_cmd and not args.no_shutdown:
             atexit.register(lambda: do_hmp(args.name, 'q'))
         connected = False
         if args.wait_ssh or args.run_cmd:
