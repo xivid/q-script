@@ -259,6 +259,16 @@ class SubCommand(object):
         """Do command"""
         print("Not implemented")
 
+    def minio_upload(self, host, s3_key, s3_secret, bucket, folder, fname):
+        import minio
+        client = minio.Minio(host, access_key=s3_key, secret_key=s3_secret, secure=False)
+
+        basename = os.path.basename(fname)
+        u = f"{folder}/{basename}"
+        print(f"uploading {fname} to {u}")
+        client.fput_object(bucket, u, fname)
+        return bucket + "/" + u
+
 class QEMUInstance(object):
     def __init__(self, rundir):
         self._rundir = rundir
@@ -349,17 +359,20 @@ def scp_call(port, user, *argv, **kwargs):
     return subprocess.call(cmd, **kwargs)
 
 def get_default_mem():
-    avail = subprocess.check_output("free -m", shell=True, encoding='utf-8').splitlines()[1].split()[6]
-    avail = int(avail) / 1000
-    if avail > 16:
-        return '10G'
-    if avail > 10:
-        return '8G'
-    if avail > 6:
-        return '4G'
-    if avail > 3:
-        return '2G'
-    else:
+    try:
+        avail = subprocess.check_output("free -m", shell=True, encoding='utf-8').splitlines()[1].split()[6]
+        avail = int(avail) / 1000
+        if avail > 16:
+            return '10G'
+        if avail > 10:
+            return '8G'
+        if avail > 6:
+            return '4G'
+        if avail > 3:
+            return '2G'
+        else:
+            return '1G'
+    except:
         return '1G'
 
 class QemuCommand(SubCommand):
@@ -761,6 +774,22 @@ class MakeCommand(SubCommand):
         build_dir = os.path.join(Q_RUNDIR, "build")
         nr_cores = get_nr_cores()
         check_call(["make", "-C", build_dir, "-j", str(nr_cores)] + argv)
+
+class MinioUploadCommand(SubCommand):
+    name = "minio-upload"
+    help = "Upload file to a minio server"
+    want_argv = True
+
+    def args(self, parser):
+        parser.add_argument("--server", '-s', type=str, required=True, help="server")
+        parser.add_argument("--user", '-u', type=str, required=True, help="username")
+        parser.add_argument("--password", '-p', type=str, required=True, help="password")
+        parser.add_argument("--bucket", '-b', type=str, required=True, help="bucket name")
+        parser.add_argument("--folder", '-f', type=str, default='q-script', help="folder name")
+
+    def do(self, args, argv):
+        for f in argv:
+            self.minio_upload(args.server, args.user, args.password, args.bucket, args.folder, f)
 
 class FioCommand(SubCommand):
     name = "fio"
