@@ -776,6 +776,7 @@ class FioCommand(SubCommand):
     direct=1
     runtime={runtime}
     filename={testfile}
+    time_based=1
 
     [seq-read]
     rw=read
