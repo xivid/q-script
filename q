@@ -435,6 +435,14 @@ class QemuCommand(SubCommand):
         drive, r = self._gen_drive(s)
         return r + ["-device", "ide-hd,drive=%s" % drive]
 
+    def _devtmpl_sev(self, s):
+        return [
+                "-object", "sev-guest,id=sev0,cbitpos=51,reduced-phys-bits=5",
+                "-machine", "q35,memory-encryption=sev0",
+                "-drive", "if=pflash,format=raw,unit=0,file=OVMF_CODE.fd,readonly=on",
+                "-drive", "if=pflash,format=raw,unit=1,file=OVMF_VARS.fd",
+        ]
+
     def _devtmpl_vblk(self, s):
         drive, r = self._gen_drive(s)
         return r + ["-device", "virtio-blk-pci,drive=%s" % drive]
