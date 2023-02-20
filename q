@@ -283,13 +283,16 @@ def get_total_cpus():
     return multiprocessing.cpu_count()
 
 def get_numa_cpus(node):
-    x = subprocess.check_output(['numactl', '-H']).decode()
-    for l in x.splitlines():
-        pref = 'node %d cpus:' % node
-        if l.startswith(pref):
-            rem = l[len(pref):]
-            return [int(x) for x in rem.split()]
-    raise Exception("Failed to find numa info")
+    ret = []
+    for x in os.listdir("/sys/devices/system/node/node%d/" % node):
+        print(x)
+        if not x.startswith("cpu"):
+            continue
+        try:
+            ret.append(int(x[3:]))
+        except:
+            pass
+    return sorted(ret)
 
 def gen_name():
     now = datetime.datetime.now()
