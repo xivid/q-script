@@ -285,7 +285,6 @@ def get_total_cpus():
 def get_numa_cpus(node):
     ret = []
     for x in os.listdir("/sys/devices/system/node/node%d/" % node):
-        print(x)
         if not x.startswith("cpu"):
             continue
         try:
