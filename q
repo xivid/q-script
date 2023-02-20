@@ -255,6 +255,9 @@ class SubCommand(object):
     aliases = []
     want_argv = False # Whether the command accepts extra arguments
 
+    def setup_args(self, parser):
+        pass
+
     def do(self, args, argv):
         """Do command"""
         print("Not implemented")
@@ -268,6 +271,92 @@ class SubCommand(object):
         print(f"uploading {fname} to {u}")
         client.fput_object(bucket, u, fname)
         return bucket + "/" + u
+
+    def mkdtemp(self, autoremove=True):
+        tmpd = tempfile.mkdtemp(dir="/var/tmp", prefix="q-%s-" % self.name)
+        if autoremove:
+            atexit.register(lambda: shutil.rmtree(tmpd))
+        return tmpd
+
+
+def get_total_cpus():
+    return multiprocessing.cpu_count()
+
+def get_numa_cpus(node):
+    x = subprocess.check_output(['numactl', '-H']).decode()
+    for l in x.splitlines():
+        pref = 'node %d cpus:' % node
+        if l.startswith(pref):
+            rem = l[len(pref):]
+            return [int(x) for x in rem.split()]
+    raise Exception("Failed to find numa info")
+
+def gen_name():
+    now = datetime.datetime.now()
+    return now.strftime("%Y-%m-%d.%s-") + os.uname()[1]
+
+class DockerContainer(object):
+    def __init__(self, image, env={}, volumes=[], cpus=0, args=[]):
+        self.image = image
+        self.name = 'q-' + gen_name()
+        self.env = env
+        self.volumes = volumes
+        self.cpus = cpus
+        self.args = args
+        self.start()
+
+    def env_args(self):
+        ret = []
+        for x in self.volumes:
+            ret += ['-v', "%s:%s" % (x[0], x[1])]
+        return ret
+
+    def volume_args(self):
+        ret = []
+        for k, v in self.env.items():
+            ret += ['-e', "%s=%s" % (k, v)]
+        return ret
+
+    def cpuset_args(self):
+        node = 0
+        cpus = ','.join([str(x) for x in get_numa_cpus(node)])
+        mems = str(node)
+        return [
+            '--cpuset-cpus', cpus,
+            '--cpuset-mems', mems]
+
+    def cpus_args(self):
+        cpus = min(get_total_cpus(), self.cpus)
+        return ['--cpus=%f' % cpus]
+
+    def start(self):
+        cmd = ['docker', 'run', '--rm', '-d',
+               '--network=host', '--name', self.name]
+        cmd += self.env_args()
+        cmd += self.volume_args()
+        cmd += self.cpuset_args()
+        cmd += self.cpus_args()
+        cmd.append(self.image)
+        cmd += self.args
+        subprocess.check_output(cmd)
+        atexit.register(self.stop)
+        for _ in range(10000):
+            cmd = ['docker', 'ps']
+            try:
+                if self.name in subprocess.check_output(cmd).decode():
+                    break
+            except:
+                pass
+            time.sleep(0.2)
+
+    def stop(self):
+        cmd = ['docker', 'kill', self.name]
+        dn = subprocess.DEVNULL
+        subprocess.Popen(cmd, stdout=dn, stderr=dn)
+
+    def do_exec(self, cmd):
+        cmd = ['docker', 'exec', self.name, '/bin/sh', '-c', cmd]
+        return subprocess.check_output(cmd).decode()
 
 class QEMUInstance(object):
     def __init__(self, rundir):
@@ -383,7 +472,7 @@ class QemuCommand(SubCommand):
     def __init__(self):
         self._ids = {}
 
-    def args(self, parser):
+    def setup_args(self, parser):
         parser.add_argument("--dry-run", action="store_true",
                             help="Only print the command line")
         parser.add_argument("--memory", type=str, default=get_default_mem(),
@@ -633,7 +722,7 @@ class QMPCommand(SubCommand):
     want_argv = True
     help = "Execute QMP command"
 
-    def args(self, parser):
+    def setup_args(self, parser):
         parser.add_argument("--name", type=str, help="QEMU instance name")
         parser.add_argument("--raw", action='store_true',
                             help="Argument is raw JSON")
@@ -682,7 +771,7 @@ class SSHCommand(SubCommand):
     want_argv = True
     help = "Execute SSH command"
 
-    def args(self, parser):
+    def setup_args(self, parser):
         parser.add_argument("--name", type=str, help="QEMU instance name")
 
     def do(self, args, argv):
@@ -694,7 +783,7 @@ class SCPCommand(SubCommand):
     want_argv = True
     help = "Execute SSH command"
 
-    def args(self, parser):
+    def setup_args(self, parser):
         parser.add_argument("--name", type=str, help="QEMU instance name")
 
     def do(self, args, argv):
@@ -706,7 +795,7 @@ class ListCommand(SubCommand):
     want_argv = True
     help = "List managed QEMU instances"
 
-    def args(self, parser):
+    def setup_args(self, parser):
         pass
 
     def do(self, args, argv):
@@ -718,7 +807,7 @@ class SSHCopyIdCommand(SubCommand):
     want_argv = False
     help = "Execute ssh-copy-id command"
 
-    def args(self, parser):
+    def setup_args(self, parser):
         parser.add_argument("--name", type=str, help="QEMU instance name")
 
     def do(self, args, argv):
@@ -736,7 +825,7 @@ class HMPCommand(SubCommand):
     name = "hmp"
     want_argv = True
 
-    def args(self, parser):
+    def setup_args(self, parser):
         parser.add_argument("--name", type=str, help="QEMU instance name")
 
     def do(self, args, argv):
@@ -747,7 +836,7 @@ class GDBCommand(SubCommand):
     name = "gdb"
     want_argv = True
 
-    def args(self, parser):
+    def setup_args(self, parser):
         parser.add_argument("--name", type=str, help="QEMU instance name")
 
     def do(self, args, argv):
@@ -758,7 +847,7 @@ class PidCommand(SubCommand):
     name = "pid"
     help = "Get PID of QEMU process"
 
-    def args(self, parser):
+    def setup_args(self, parser):
         parser.add_argument("--name", type=str, help="QEMU instance name")
 
     def do(self, args, argv):
@@ -782,7 +871,7 @@ class MinioUploadCommand(SubCommand):
     help = "Upload file to a minio server"
     want_argv = True
 
-    def args(self, parser):
+    def setup_args(self, parser):
         parser.add_argument("--server", '-s', type=str, required=True, help="server")
         parser.add_argument("--user", '-u', type=str, required=True, help="username")
         parser.add_argument("--password", '-p', type=str, required=True, help="password")
@@ -792,6 +881,94 @@ class MinioUploadCommand(SubCommand):
     def do(self, args, argv):
         for f in argv:
             self.minio_upload(args.server, args.user, args.password, args.bucket, args.folder, f)
+
+class PgbenchCommand(SubCommand):
+    name = "pgbench"
+    help = "Run pgbench"
+    want_argv = True
+
+    def setup_args(self, parser):
+        parser.add_argument("--scale-factor", "-s", type=int, default=1,
+                help="pgbench scale factor")
+        parser.add_argument("--test-time", "-t", type=int, default=5,
+                help="pgbench test time")
+        parser.add_argument("--concurrency", "-c", type=int, default=32,
+                help="pgbench test concurrency (both threads and clients)")
+        parser.add_argument("--metrics", "-m", action="store_true",
+                help="Collect telegraf metrics")
+
+    def do(self, args, argv):
+        env = {
+            'POSTGRES_PASSWORD': 'benchpass',
+            'POSTGRES_USER': 'bench',
+            'PGHOST': 'localhost',
+            'PGPORT': '5432',
+            'PGUSER': 'bench',
+            'PGDATABASE': 'bench',
+            'PGPASSWORD': 'benchpass'
+        }
+        tmpd = self.mkdtemp(False)
+        vols = [(tmpd, '/var/lib/postgresql/data')]
+        d = DockerContainer('postgres:12.13', env=env, volumes=vols, cpus=args.concurrency)
+        time.sleep(5)
+        print("preparing data...")
+        d.do_exec("pgbench -i -s %d" % args.scale_factor)
+        print("benchmarking read only...")
+        self.container = d
+        if args.metrics:
+            self.start_telegraf()
+        ro = self.bench_ro()
+        print("benchmarking read write...")
+        rw = self.bench_rw()
+        print("== Test completed ==")
+        print()
+        print("=== RO result ===")
+        print(ro)
+        print()
+        print("=== RW result ===")
+        print(rw)
+
+    def bench_do(self, sql):
+        cmd = """
+        cat >bench.sql <<EOF
+        """ + sql + """
+EOF
+        pgbench -M prepared -v -r -P 1 --progress-timestamp \
+                -f ./bench.sql \
+                -c {concurrency} -j {concurrency} -T {test_time} -D scale=10000 -D range=100000000
+        """.format(
+                test_time=self.args.test_time,
+                concurrency=self.args.concurrency,
+                )
+        r = self.container.do_exec(cmd)
+        ret = []
+        for l in r.splitlines():
+            if 'latency' in l or 'tps' in l:
+                ret.append(l)
+        return "\n".join(ret)
+
+    def bench_ro(self):
+        sql = """
+\set aid random_gaussian(1, :range, 10.0)
+SELECT abalance FROM pgbench_accounts WHERE aid = :aid;
+"""
+        return self.bench_do(sql)
+
+    def bench_rw(self):
+        sql = """
+\set aid random_gaussian(1, :range, 10.0)
+\set bid random(1, 1 * :scale)
+\set tid random(1, 10 * :scale)
+\set delta random(-5000, 5000)
+BEGIN;
+UPDATE pgbench_accounts SET abalance = abalance + :delta WHERE aid = :aid;
+SELECT abalance FROM pgbench_accounts WHERE aid = :aid;
+UPDATE pgbench_tellers SET tbalance = tbalance + :delta WHERE tid = :tid;
+UPDATE pgbench_branches SET bbalance = bbalance + :delta WHERE bid = :bid;
+INSERT INTO pgbench_history (tid, bid, aid, delta, mtime) VALUES (:tid, :bid, :aid, :delta, CURRENT_TIMESTAMP);
+END;
+"""
+        return self.bench_do(sql)
 
 class FioCommand(SubCommand):
     name = "fio"
@@ -830,7 +1007,7 @@ class FioCommand(SubCommand):
     stonewall
     """
 
-    def args(self, parser):
+    def setup_args(self, parser):
         parser.add_argument("-t", "--runtime", type=int, default=30)
         parser.add_argument("-s", "--size", default='10g')
         parser.add_argument("-b", "--bs", default='4k')
@@ -847,7 +1024,7 @@ class FioCommand(SubCommand):
                         'iodepth': int(iodepth),
                     }
                 )
-        tmpd = tempfile.mkdtemp(dir='.', prefix="q-fio")
+        tmpd = self.mkdtemp()
         atexit.register(lambda: shutil.rmtree(tmpd))
         tf = args.testfile or os.path.join(tmpd, 'testfile')
         for c in configs:
@@ -891,7 +1068,7 @@ class BuildCommand(SubCommand):
     aliases = ["b"]
     want_argv = True
     help = "Build QEMU"
-    def args(self, parser):
+    def setup_args(self, parser):
         parser.add_argument("-r", "--rebuild", action="store_true",
                             help="Force rebuild")
         parser.add_argument("-i", "--install", action="store_true",
@@ -947,7 +1124,7 @@ class IotestsCommand(SubCommand):
     want_argv = True
     help = "Run iotests in QEMU build dir"
 
-    def args(self, parser):
+    def setup_args(self, parser):
         parser.add_argument("-A", "--all", action="store_true",
                             help="Run formats raw qcow2 and vmdk")
         parser.add_argument("-i", "--ignore-error", action="store_true",
@@ -976,7 +1153,7 @@ class VMGrowCommand(SubCommand):
         '--run-command', 'resize2fs /dev/sda1 || xfs_growfs /dev/sda1',
     ]
 
-    def args(self, parser):
+    def setup_args(self, parser):
         parser.add_argument("image", help="Image file")
         parser.add_argument("size", help="new size")
 
@@ -1070,7 +1247,7 @@ class VMCreateCommand(SubCommand):
         },
     }
 
-    def args(self, parser):
+    def setup_args(self, parser):
         parser.add_argument("-f", "--flavor", default="ubuntu",
                             help="Guest VM flavor to create. supported: %s" % (', '.join(self.flavors)))
         parser.add_argument("--force", "-F", action="store_true",
@@ -1129,7 +1306,7 @@ class VMCreateCommand(SubCommand):
             iso_tmp = iso + ".tmp"
             subprocess.check_call(["wget", "-O", iso_tmp, url])
             subprocess.check_call(["mv", iso_tmp, iso])
-        tmpd = tempfile.mkdtemp()
+        tmpd = self.mkdtemp()
         atexit.register(lambda: shutil.rmtree(tmpd))
         print(tmpd)
         subprocess.check_output(['7z', 'x', iso], cwd=tmpd)
@@ -1193,7 +1370,7 @@ class PatchFilterCommand(SubCommand):
     want_argv = False
     help = "Filter git patch and make it easier for branch comparison"
 
-    def args(self, parser):
+    def setup_args(self, parser):
         pass
 
     def do(self, args, argv):
@@ -1206,7 +1383,7 @@ class CompareBranchesCommand(SubCommand):
     want_argv = False
     help = "Compare two branches"
 
-    def args(self, parser):
+    def setup_args(self, parser):
         parser.add_argument("left", type=str, help="Left branch")
         parser.add_argument("right", type=str, help="Right branch")
         parser.add_argument("--num-commits", "-n", type=int, help="Number of commits to compare")
@@ -1235,7 +1412,7 @@ class FlamegraphCommand(SubCommand):
 
     flamegraph_dir = os.path.join(Q_RUNDIR, ".flamegraph")
 
-    def args(self, parser):
+    def setup_args(self, parser):
         parser.add_argument("--output", "-o", required=True)
         parser.add_argument("--data", "-d", type=str, help="perf data path")
 
@@ -1247,7 +1424,7 @@ class FlamegraphCommand(SubCommand):
                           self.flamegraph_dir])
 
     def perf_record(self, argv):
-        td = tempfile.mkdtemp()
+        td = self.mkdtemp()
         fn = td + "/perf.data"
         check_call(['sudo', '-n', 'perf', 'record', '-a', '-g', '-o', fn] + argv)
         return fn
@@ -1284,8 +1461,7 @@ def main():
         cmd = c()
         p = subparsers.add_parser(cmd.name, aliases=cmd.aliases,
                                   help=cmd.help)
-        if hasattr(cmd, "args"):
-            cmd.args(p)
+        cmd.setup_args(p)
         p.set_defaults(func=cmd.do, cmdobj=cmd, all=False)
     args, argv = parser.parse_known_args()
     if not hasattr(args, "cmdobj"):
@@ -1295,6 +1471,7 @@ def main():
         logging.basicConfig(level=logging.DEBUG)
     if argv and not args.cmdobj.want_argv:
         raise Exception("Unrecognized arguments:\n" + argv[0])
+    args.cmdobj.args = args
     r = args.func(args, argv)
     return r
 
