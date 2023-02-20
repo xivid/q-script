@@ -1226,7 +1226,7 @@ class FlamegraphCommand(SubCommand):
                 perf_data, self.flamegraph_dir, output)
         check_output(cmd)
 
-        cmd = "%s/flamegraph.pl %s.stacks > %s" % (self.flamegraph_dir, perf_data, output)
+        cmd = "%s/flamegraph.pl %s.stacks > %s" % (self.flamegraph_dir, output, output)
 
         check_output(cmd)
 
