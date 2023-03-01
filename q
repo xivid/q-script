@@ -37,6 +37,7 @@ import datetime
 import hashlib
 import re
 import atexit
+import signal
 
 ####### QMP module #######
 import errno
@@ -248,6 +249,13 @@ def print_cmd(cmd):
             x = '"' + x + '"'
         return x
     print(" ".join([escape(x) for x in cmd]))
+
+
+def git_clone_maybe(repo, target):
+    if not os.path.exists(target):
+        check_call(["mkdir", "-p", os.path.dirname(target)])
+        check_output(['git', 'clone', '--depth=1', repo,
+                      target])
 
 class SubCommand(object):
     """ Base class of subcommand"""
@@ -972,6 +980,36 @@ END;
 """
         return self.bench_do(sql)
 
+class IpcBenchCommand(SubCommand):
+    name = "ipc-bench"
+    want_argv = True
+    help = "Run ipc-bench"
+
+    def setup_args(self, parser):
+        parser.add_argument("-t", "--test", default="domain")
+
+    def do(self, args, argv):
+        signal.signal(signal.SIGUSR2, lambda sig, stack: print("SIGUSR2 received"))
+        repo = 'https://github.com/famz/ipc-bench'
+        workdir = os.path.join(Q_RUNDIR, "ipc-bench")
+        test_exe = os.path.join(workdir, f"./build/source/{args.test}/{args.test}")
+        if not os.path.exists(test_exe):
+            git_clone_maybe(repo, workdir)
+            nr_cores = get_nr_cores()
+            check_call(f"""
+                set -e
+                mkdir -p {workdir}/build
+                cd "{workdir}/build"
+                cmake ..
+                make -j{nr_cores - 1}
+                """
+            )
+        test_args = ""
+        if args.test == "domain":
+            test_args = " -c 2000000 -s 1024"
+        cmd = test_exe + test_args
+        subprocess.check_call(["bash", "-c", cmd], cwd=workdir)
+
 class FioCommand(SubCommand):
     name = "fio"
     want_argv = True
@@ -1418,13 +1456,6 @@ class FlamegraphCommand(SubCommand):
         parser.add_argument("--output", "-o", required=True)
         parser.add_argument("--data", "-d", type=str, help="perf data path")
 
-    def fetch_flamegraph_maybe(self):
-        if not os.path.exists(self.flamegraph_dir):
-            check_call(["mkdir", "-p", Q_RUNDIR])
-            check_output(['git', 'clone', '--depth=1',
-                          'https://github.com/brendangregg/FlameGraph',
-                          self.flamegraph_dir])
-
     def perf_record(self, argv):
         td = self.mkdtemp()
         fn = td + "/perf.data"
@@ -1441,7 +1472,8 @@ class FlamegraphCommand(SubCommand):
         check_output(cmd)
 
     def do(self, args, argv):
-        self.fetch_flamegraph_maybe()
+        repo = 'https://github.com/brendangregg/FlameGraph'
+        git_clone_maybe(repo, self.flamegraph_dir)
         if args.data:
             fn = args.data
         else:
