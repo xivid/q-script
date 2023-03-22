@@ -474,6 +474,9 @@ def get_default_mem():
     except:
         return '1G'
 
+def get_default_qemu():
+    return "qemu-system-" + os.uname().machine
+
 class QemuCommand(SubCommand):
     name = "qemu"
     aliases = ["q"]
@@ -491,7 +494,7 @@ class QemuCommand(SubCommand):
                             help="name of the QEMU instance")
         parser.add_argument("-f", "--foreground", action="store_true",
                             help="Don't detach after QEMU started")
-        parser.add_argument("-p", "--program", default="qemu-system-x86_64",
+        parser.add_argument("-p", "--program", default=get_default_qemu(),
                             help="Which qemu executable to use")
         parser.add_argument("--no-net", action="store_true",
                             help="Don't add network")
@@ -1244,7 +1247,15 @@ class VMCreateCommand(SubCommand):
             'url': "https://cloud-images.ubuntu.com/releases/jammy/release/ubuntu-22.04-server-cloudimg-amd64.img",
             'virt_customize_args': [
                 "--run-command", "touch .hushlogin",
-                "--uninstall", "snap,cloud-init",
+                "--uninstall", "snap,snapd,cloud-init",
+                "--install", "dhcpcd5",
+            ],
+        },
+        'ubuntu-arm64': {
+            'url': "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-arm64.img",
+            'virt_customize_args': [
+                "--run-command", "touch .hushlogin",
+                "--uninstall", "snap,snapd,cloud-init",
                 "--install", "dhcpcd5",
             ],
         },
@@ -1252,7 +1263,7 @@ class VMCreateCommand(SubCommand):
             'url': "https://cdimage.ubuntu.com/ubuntu-server/focal/daily-live/current/focal-live-server-amd64.iso",
             'virt_customize_args': [
                 "--run-command", "touch .hushlogin",
-                "--uninstall", "snap,cloud-init",
+                "--uninstall", "snap,snapd,cloud-init",
                 "--install", "dhcpcd5",
             ],
         },
@@ -1275,7 +1286,7 @@ class VMCreateCommand(SubCommand):
             'url': "https://cloud-images.ubuntu.com/releases/jammy/release/ubuntu-22.04-server-cloudimg-amd64.img",
             'virt_customize_args': [
                 "--run-command", "touch .hushlogin",
-                "--uninstall", "snap,cloud-init",
+                "--uninstall", "snap,snapd,cloud-init",
                 "--install", "unzip,dhcpcd5",
                 "--run-command", """
                 set -e
