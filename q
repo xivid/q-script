@@ -1397,6 +1397,74 @@ class VMCreateCommand(SubCommand):
         flavor = self.flavors[args.flavor]
         self.create_image(args.flavor, flavor['url'], args, flavor.get("virt_customize_args", []))
 
+class CustomizeCommand(SubCommand):
+    name = "customize"
+    aliases = ['c']
+    want_argv = False
+    help = "Filter git patch and make it easier for branch comparison"
+
+    def setup_args(self, parser):
+        parser.add_argument("--image", "-a")
+        parser.add_argument("--ssh-inject", action="store_true")
+        parser.add_argument("--install", action="append")
+        parser.add_argument("--uninstall", action="append")
+        parser.add_argument("--run-command", action="append")
+
+    def do(self, args, argv):
+        img = args.image
+        if args.ssh_inject:
+            if 'qcow2' in check_output(['qemu-img', 'info', img]):
+                rawimg = img + ".raw"
+                check_output(['qemu-img', 'convert', img, rawimg])
+                self.ssh_inject(rawimg, args.ssh_inject)
+                check_output(['qemu-img', 'convert', rawimg, img, '-O', 'qcow2'])
+                os.unlink(rawimg)
+            else:
+                self.ssh_inject(img, args.ssh_inject)
+        if args.install or args.uninstall or args.run_command:
+            vm = self.start_vm(img)
+            for pkpg in args.install:
+                self.do_install(vm, pkpg)
+            for pkpg in args.uninstall:
+                self.do_uninstall(vm, pkpg)
+
+    def ssh_inject(self, img, user):
+        ld = check_output(f"""sudo losetup -P -f --show "{img}" """).strip()
+        try:
+            for x in check_output(f"ls {ld}p*").split():
+                if self.try_ssh_inject(x):
+                    return True
+            raise Exception("Cannot find partition to inject ssh")
+        finally:
+            check_output(f"sudo losetup -d {ld}")
+
+    def read_pubkey(self):
+        with open(os.path.expanduser("~/.ssh/id_rsa.pub"), "r") as f:
+            return f.read()
+
+    def try_ssh_inject(self, dev):
+        mp = tempfile.mkdtemp()
+        pubkey = self.read_pubkey()
+        try:
+            check_call(f"sudo mount {dev} {mp}")
+            cmd = f"""
+                set -e
+                cd {mp}
+                if test -d root; then
+                    mkdir -p root/.ssh
+                    echo {pubkey} >> root/.ssh/authorized_keys
+                    chmod 600 root/.ssh/authorized_keys
+                    exit 0
+                fi
+                exit 1
+            """
+            check_output(['sudo', 'sh', '-c', cmd])
+            return True
+        except:
+            pass
+        finally:
+            subprocess.call(["sudo", "umount", dev])
+
 class PatchFilter(object):
     def __init__(self):
         self.prev_line = ""
