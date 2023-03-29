@@ -1202,7 +1202,7 @@ class VMGrowCommand(SubCommand):
 
     def do(self, args, argv):
         subprocess.check_call(["qemu-img", 'resize', args.image, args.size])
-        subprocess.check_call(['virt-customize'] + self.growcmds + [
+        subprocess.check_call([sys.argv[0], 'customize'] + self.growcmds + [
             '-a', args.image])
 
 ubuntu_user_data = """
@@ -1245,7 +1245,7 @@ class VMCreateCommand(SubCommand):
     flavors = {
         'ubuntu': {
             'url': "https://cloud-images.ubuntu.com/releases/jammy/release/ubuntu-22.04-server-cloudimg-amd64.img",
-            'virt_customize_args': [
+            'customize_args': [
                 "--run-command", "touch .hushlogin",
                 "--uninstall", "snap,snapd,cloud-init",
                 "--install", "dhcpcd5",
@@ -1253,7 +1253,7 @@ class VMCreateCommand(SubCommand):
         },
         'ubuntu-arm64': {
             'url': "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-arm64.img",
-            'virt_customize_args': [
+            'customize_args': [
                 "--run-command", "touch .hushlogin",
                 "--uninstall", "snap,snapd,cloud-init",
                 "--install", "dhcpcd5",
@@ -1261,7 +1261,7 @@ class VMCreateCommand(SubCommand):
         },
         'ubuntu-iso': {
             'url': "https://cdimage.ubuntu.com/ubuntu-server/focal/daily-live/current/focal-live-server-amd64.iso",
-            'virt_customize_args': [
+            'customize_args': [
                 "--run-command", "touch .hushlogin",
                 "--uninstall", "snap,snapd,cloud-init",
                 "--install", "dhcpcd5",
@@ -1278,13 +1278,13 @@ class VMCreateCommand(SubCommand):
         },
         'fedora': {
             'url': 'https://download.fedoraproject.org/pub/fedora/linux/releases/36/Cloud/x86_64/images/Fedora-Cloud-Base-36-1.5.x86_64.raw.xz',
-            'virt_customize_args': [
+            'customize_args': [
                 "--install", "cloud-utils-growpart",
             ],
         },
         'phoronix-test-suite': {
             'url': "https://cloud-images.ubuntu.com/releases/jammy/release/ubuntu-22.04-server-cloudimg-amd64.img",
-            'virt_customize_args': [
+            'customize_args': [
                 "--run-command", "touch .hushlogin",
                 "--uninstall", "snap,snapd,cloud-init",
                 "--install", "unzip,dhcpcd5",
@@ -1309,7 +1309,7 @@ class VMCreateCommand(SubCommand):
                             help="virtual size of the image. Specifying as 0 disables resize")
         parser.add_argument("image", help="Image file")
 
-    def create_image_via_cloud_image(self, flavor, url, args, virt_customize_args=[]):
+    def create_image_via_cloud_image(self, flavor, url, args, customize_args=[]):
         cloudimg = os.path.join(self._cache_dir, flavor + ".img")
         if not os.path.exists(cloudimg):
             cloudimg_tmp = cloudimg + ".tmp"
@@ -1328,8 +1328,8 @@ class VMCreateCommand(SubCommand):
         if args.install:
             install_pkgs = [x.strip() for x in args.install.split(',')]
         if install_pkgs:
-            virt_customize_args += ['--install', ','.join(install_pkgs)]
-        cmd = ['virt-customize'] + growcmds + [
+            customize_args += ['--install', ','.join(install_pkgs)]
+        cmd = [sys.argv[0], 'customize'] + growcmds + [
             '--run-command', 'ssh-keygen -A',
             '--run-command', 'echo SELINUX=disabled > /etc/selinux/config || true',
             '--copy-in', os.path.realpath(sys.argv[0]) + ':/usr/local/bin',
@@ -1343,14 +1343,14 @@ class VMCreateCommand(SubCommand):
                         echo 'ExecStart=-/sbin/agetty --autologin root %I $TERM'
                     ) > override.conf
                 done
-            """] + virt_customize_args + [
+            """] + customize_args + [
             '--root-password', 'password:testpass',
-            '--ssh-inject', 'root',
+            '--ssh-prepare',
             '-a', args.image]
         print("\n".join(cmd))
         subprocess.check_call(cmd)
 
-    def create_image_via_ubuntu_iso(self, flavor, url, args, virt_customize_args=[]):
+    def create_image_via_ubuntu_iso(self, flavor, url, args, customize_args=[]):
         iso = os.path.join(self._cache_dir, flavor + ".iso")
         uiso = os.path.join(self._cache_dir, flavor + "-unattended.iso")
         if not os.path.exists(iso):
@@ -1381,11 +1381,11 @@ class VMCreateCommand(SubCommand):
         print(uiso)
         subprocess.check_output(f"q q +vblk:test.img -cdrom {uiso}", shell=True)
 
-    def create_image(self, flavor, url, args, virt_customize_args=[]):
+    def create_image(self, flavor, url, args, customize_args=[]):
         if url.endswith(".iso"):
-            return self.create_image_via_ubuntu_iso(flavor, url, args, virt_customize_args)
+            return self.create_image_via_ubuntu_iso(flavor, url, args, customize_args)
         else:
-            return self.create_image_via_cloud_image(flavor, url, args, virt_customize_args)
+            return self.create_image_via_cloud_image(flavor, url, args, customize_args)
 
     def do(self, args, argv):
         self._cache_dir = os.path.join(Q_RUNDIR, ".vmcreate")
@@ -1395,7 +1395,7 @@ class VMCreateCommand(SubCommand):
         if not os.path.exists(self._cache_dir):
             os.makedirs(self._cache_dir)
         flavor = self.flavors[args.flavor]
-        self.create_image(args.flavor, flavor['url'], args, flavor.get("virt_customize_args", []))
+        self.create_image(args.flavor, flavor['url'], args, flavor.get("customize_args", []))
 
 class CustomizeCommand(SubCommand):
     name = "customize"
@@ -1406,29 +1406,42 @@ class CustomizeCommand(SubCommand):
     def setup_args(self, parser):
         parser.add_argument("--image", "-a")
         parser.add_argument("--ssh-prepare", action="store_true")
-        parser.add_argument("--install", action="append")
-        parser.add_argument("--uninstall", action="append")
-        parser.add_argument("--run-command", action="append")
+        parser.add_argument("--install", default="")
+        parser.add_argument("--uninstall", default="")
+        parser.add_argument("--run-command", action="append", default=[])
+        parser.add_argument("--root-password")
+        parser.add_argument("--copy-in", action="append")
 
     def do(self, args, argv):
         img = args.image
-        if args.ssh_prepare:
+        if args.ssh_prepare or args.root_password:
             if 'qcow2' in check_output(['qemu-img', 'info', img]):
                 rawimg = img + ".raw"
                 check_output(['qemu-img', 'convert', img, rawimg])
-                self.ssh_prepare(rawimg, args.ssh_prepare)
+                self.ssh_prepare(rawimg)
                 check_output(['qemu-img', 'convert', rawimg, img, '-O', 'qcow2'])
                 os.unlink(rawimg)
             else:
                 self.ssh_prepare(img, args.ssh_prepare)
         if args.install or args.uninstall or args.run_command:
-            vm = self.start_vm(img)
-            for pkpg in args.install:
-                self.do_install(vm, pkpg)
-            for pkpg in args.uninstall:
-                self.do_uninstall(vm, pkpg)
+            cmd = []
+            cmd.append(self.make_install_cmd(args.install.split(',')))
+            cmd.append(self.make_uninstall_cmd(args.uninstall.split(',')))
+            for cmd in args.run_command:
+                cmd.append(cmd)
+            check_call([sys.argv[0], 'q', '+vblk:' + img, '-c', '\n'.join(cmd)])
 
-    def ssh_prepare(self, img, user):
+    def make_install_cmd(self, pkgs):
+        if not pkgs:
+            return "true"
+        return 'apt-get install -y ' + ' '.join(pkgs)
+
+    def make_uninstall_cmd(self, pkgs):
+        if not pkgs:
+            return "true"
+        return 'apt-get uninstall -y ' + ' '.join(pkgs)
+
+    def ssh_prepare(self, img):
         ld = check_output(f"""sudo losetup -P -f --show "{img}" """).strip()
         try:
             for x in check_output(f"ls {ld}p*").split():
@@ -1443,38 +1456,44 @@ class CustomizeCommand(SubCommand):
             return f.read()
 
     def try_ssh_prepare(self, dev):
+        print("try_ssh_prepare", dev)
         mp = tempfile.mkdtemp()
         pubkey = self.read_pubkey()
         try:
             check_call(f"sudo mount {dev} {mp}")
             cmd = f"""
                 set -e
+                set -x
                 cd {mp}
-                if test -d root; then
+                if test -d etc; then
                     mkdir -p root/.ssh
                     echo {pubkey} >> root/.ssh/authorized_keys
                     chmod 600 root/.ssh/authorized_keys
                     chroot {mp} sh -c 'ssh-keygen -A'
+                    if test -n "{self.args.root_password}"; then
+                        chroot {mp} sh -c 'echo root:{self.args.root_password} | chpasswd'
+                    fi
                     (
                         echo [Unit]
                         echo Description=dhclient service generated by q-script
                         echo After=network.target
-                        echo 
+                        echo
                         echo [Service]
                         echo ExecStart=/usr/sbin/dhclient
                         echo Restart=always
                         echo Type=oneshot
-                        echo 
+                        echo
                         echo [Install]
                         echo WantedBy=multi-user.target
                     ) > {mp}/etc/systemd/system/multi-user.target.wants/dhclient.service
+                    exit 0
                 fi
                 exit 1
             """
-            check_output(['sudo', 'sh', '-c', cmd])
+            check_call(['sudo', 'sh', '-c', cmd])
             return True
-        except:
-            pass
+        except Exception as e:
+            print(e)
         finally:
             subprocess.call(["sudo", "umount", dev])
 
