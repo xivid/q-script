@@ -514,9 +514,15 @@ class QemuCommand(SubCommand):
     def _rundir_filename(self, fn):
         return os.path.join(self._rundir, fn)
 
+    def get_machine_type(self):
+        m = os.uname()[4]
+        if m == 'aarch64':
+            return 'virt'
+        return 'q35'
+
     def _def_args(self, args, argv):
         self._sshport = find_port(10022)
-        ret = ["-enable-kvm", '-cpu', 'max', '-machine', 'q35']
+        ret = ["-enable-kvm", '-cpu', 'max', '-machine', self.get_machine_type()]
         if '-m' not in argv:
             ret += ["-m", args.memory]
         if '-smp' not in argv:
@@ -1453,7 +1459,7 @@ class CustomizeCommand(SubCommand):
 
     def read_pubkey(self):
         with open(os.path.expanduser("~/.ssh/id_rsa.pub"), "r") as f:
-            return f.read()
+            return f.read().strip()
 
     def try_ssh_prepare(self, dev):
         print("try_ssh_prepare", dev)
@@ -1486,16 +1492,18 @@ class CustomizeCommand(SubCommand):
                         echo [Install]
                         echo WantedBy=multi-user.target
                     ) > {mp}/etc/systemd/system/multi-user.target.wants/dhclient.service
+                    sync
                     exit 0
                 fi
                 exit 1
             """
-            check_call(['sudo', 'sh', '-c', cmd])
+            check_call(['sudo', 'bash', '-c', cmd])
             return True
         except Exception as e:
             print(e)
         finally:
             subprocess.call(["sudo", "umount", dev])
+            shutil.rmtree(mp)
 
 class PatchFilter(object):
     def __init__(self):
