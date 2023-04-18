@@ -1314,6 +1314,7 @@ class VMCreateCommand(SubCommand):
         parser.add_argument("--size", "-s", default="10G",
                             help="virtual size of the image. Specifying as 0 disables resize")
         parser.add_argument("image", help="Image file")
+        parser.add_argument("--verbose", "-v", action="store_true")
 
     def create_image_via_cloud_image(self, flavor, url, args, customize_args=[]):
         cloudimg = os.path.join(self._cache_dir, flavor + ".img")
@@ -1335,6 +1336,8 @@ class VMCreateCommand(SubCommand):
             install_pkgs = [x.strip() for x in args.install.split(',')]
         if install_pkgs:
             customize_args += ['--install', ','.join(install_pkgs)]
+        if args.verbose:
+            customize_args += ['--verbose']
         cmd = [sys.argv[0], 'customize'] + growcmds + [
             '--run-command', 'ssh-keygen -A',
             '--run-command', 'echo SELINUX=disabled > /etc/selinux/config || true',
@@ -1417,6 +1420,7 @@ class CustomizeCommand(SubCommand):
         parser.add_argument("--run-command", action="append", default=[])
         parser.add_argument("--root-password")
         parser.add_argument("--copy-in", action="append")
+        parser.add_argument("--verbose", action="store_true")
 
     def do(self, args, argv):
         img = args.image
@@ -1434,7 +1438,10 @@ class CustomizeCommand(SubCommand):
             cmd.append(self.make_install_cmd(args.install.split(',')))
             cmd.append(self.make_uninstall_cmd(args.uninstall.split(',')))
             cmd += args.run_command
-            check_call([sys.argv[0], 'q', '+vblk:' + img, '-c', '\n'.join(cmd)])
+            q_cmd = [sys.argv[0], 'q', '+vblk:' + img, '-c', '\n'.join(cmd)]
+            if args.verbose:
+                q_cmd += ['-serial', 'stdio']
+            check_call(q_cmd)
 
     def make_install_cmd(self, pkgs):
         if not pkgs:
@@ -1485,12 +1492,9 @@ class CustomizeCommand(SubCommand):
                         echo
                         echo [Service]
                         echo ExecStart=/usr/sbin/dhclient
-                        echo Restart=always
                         echo Type=oneshot
-                        echo
-                        echo [Install]
-                        echo WantedBy=multi-user.target
-                    ) > {mp}/etc/systemd/system/multi-user.target.wants/dhclient.service
+                    ) > {mp}/etc/systemd/system/dhclient.service
+                    ln -s ../dhclient.service {mp}/etc/systemd/system/multi-user.target.wants/dhclient.service
                     sync
                     exit 0
                 fi
