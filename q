@@ -1350,7 +1350,7 @@ class VMCreateCommand(SubCommand):
                     ) > override.conf
                 done
             """] + customize_args + [
-            '--root-password', 'password:testpass',
+            '--root-password', 'testpass',
             '--ssh-prepare',
             '-a', args.image]
         print("\n".join(cmd))
@@ -1433,8 +1433,7 @@ class CustomizeCommand(SubCommand):
             cmd = []
             cmd.append(self.make_install_cmd(args.install.split(',')))
             cmd.append(self.make_uninstall_cmd(args.uninstall.split(',')))
-            for cmd in args.run_command:
-                cmd.append(cmd)
+            cmd += args.run_command
             check_call([sys.argv[0], 'q', '+vblk:' + img, '-c', '\n'.join(cmd)])
 
     def make_install_cmd(self, pkgs):
