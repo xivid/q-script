@@ -522,6 +522,7 @@ class QemuCommand(SubCommand):
 
     def _def_args(self, args, argv):
         self._sshport = find_port(10022)
+        self._rdpport = find_port(13389)
         ret = ["-enable-kvm", '-cpu', 'max', '-machine', self.get_machine_type()]
         if '-m' not in argv:
             ret += ["-m", args.memory]
@@ -533,7 +534,7 @@ class QemuCommand(SubCommand):
             ret += ["-display", "none", "-vnc", "127.0.0.1:0,to=20"]
         # TODO: fix 10022 to a dynamic port
         if not args.no_net:
-            ret += ["-netdev", "user,id=vnet,net=%s,host=%s,hostfwd=:0.0.0.0:%d-:22" % (args.net, args.host, self._sshport),
+            ret += ["-netdev", "user,id=vnet,net=%s,host=%s,hostfwd=:0.0.0.0:%d-:22,hostfwd=:0.0.0.0:%d-:3389" % (args.net, args.host, self._sshport, self._rdpport),
                     "-device", args.nic + ",netdev=vnet,mac=00:8c:fa:e4:a3:53"]
 
         return ret;
