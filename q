@@ -1254,6 +1254,9 @@ class VMCreateCommand(SubCommand):
             'url': "https://cloud-images.ubuntu.com/releases/jammy/release/ubuntu-22.04-server-cloudimg-amd64.img",
             'customize_args': [
                 "--run-command", "touch .hushlogin",
+                "--run-command", "echo PasswordAuthentication yes >> /etc/ssh/sshd_config",
+                "--run-command", "echo PermitRootLogin yes >> /etc/ssh/sshd_config",
+                "--run-command", "echo PubkeyAcceptedKeyTypes +ssh-rsa >> /etc/ssh/sshd_config",
                 "--uninstall", "snap,snapd,cloud-init",
                 "--install", "dhcpcd5",
             ],
