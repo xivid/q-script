@@ -270,9 +270,9 @@ class SubCommand(object):
         """Do command"""
         print("Not implemented")
 
-    def minio_upload(self, host, s3_key, s3_secret, bucket, folder, fname):
+    def minio_upload(self, host, s3_key, s3_secret, bucket, folder, fname, secure=False):
         import minio
-        client = minio.Minio(host, access_key=s3_key, secret_key=s3_secret, secure=False)
+        client = minio.Minio(host, access_key=s3_key, secret_key=s3_secret, secure=secure)
 
         basename = os.path.basename(fname)
         u = f"{folder}/{basename}"
@@ -896,10 +896,11 @@ class MinioUploadCommand(SubCommand):
         parser.add_argument("--password", '-p', type=str, required=True, help="password")
         parser.add_argument("--bucket", '-b', type=str, required=True, help="bucket name")
         parser.add_argument("--folder", '-f', type=str, default='q-script', help="folder name")
+        parser.add_argument("--insecure", action="store_true")
 
     def do(self, args, argv):
         for f in argv:
-            self.minio_upload(args.server, args.user, args.password, args.bucket, args.folder, f)
+            self.minio_upload(args.server, args.user, args.password, args.bucket, args.folder, f, not args.insecure)
 
 class PgbenchCommand(SubCommand):
     name = "pgbench"
