@@ -1202,6 +1202,7 @@ class VMGrowCommand(SubCommand):
     growcmds = [
         '--run-command', '/bin/bash /bin/growpart /dev/vda 1',
         '--run-command', 'resize2fs /dev/vda1 || xfs_growfs /dev/vda1',
+        '--run-command', 'sync',
     ]
 
     def setup_args(self, parser):
