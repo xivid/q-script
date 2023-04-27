@@ -1200,8 +1200,8 @@ class VMGrowCommand(SubCommand):
     help = "Grow guest image"
 
     growcmds = [
-        '--run-command', '/bin/bash /bin/growpart /dev/sda 1',
-        '--run-command', 'resize2fs /dev/sda1 || xfs_growfs /dev/sda1',
+        '--run-command', '/bin/bash /bin/growpart /dev/vda 1',
+        '--run-command', 'resize2fs /dev/vda1 || xfs_growfs /dev/vda1',
     ]
 
     def setup_args(self, parser):
