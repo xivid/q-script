@@ -1452,12 +1452,12 @@ class CustomizeCommand(SubCommand):
     def make_install_cmd(self, pkgs):
         if not pkgs:
             return "true"
-        return 'apt-get install -y ' + ' '.join(pkgs)
+        return 'export DEBIAN_FRONTEND=noninteractive; apt-get update -y && apt-get install -y ' + ' '.join(pkgs)
 
     def make_uninstall_cmd(self, pkgs):
         if not pkgs:
             return "true"
-        return 'apt-get uninstall -y ' + ' '.join(pkgs)
+        return 'export DEBIAN_FRONTEND=noninteractive; apt-get remove -y ' + ' '.join(pkgs)
 
     def ssh_prepare(self, img):
         ld = check_output(f"""sudo losetup -P -f --show "{img}" """).strip()
