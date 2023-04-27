@@ -484,6 +484,7 @@ class QemuCommand(SubCommand):
     help = "Start QEMU"
     def __init__(self):
         self._ids = {}
+        self.serial = None
 
     def setup_args(self, parser):
         parser.add_argument("--dry-run", action="store_true",
@@ -722,9 +723,8 @@ class QemuCommand(SubCommand):
                     break
                 time.sleep(0.5)
             if not connected:
-                sf = getattr(self, 'serial')
-                if sf and sf.startswith(self._rundir):
-                    subprocess.call(['cat', sf])
+                if self.serial and self.serial.startswith(self._rundir):
+                    subprocess.call(['cat', self.serial])
                 logging.error("Timeout while waiting for SSH server")
                 return 1
         else:
