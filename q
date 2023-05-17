@@ -1076,7 +1076,7 @@ class FioCommand(SubCommand):
                     }
                 )
         tmpd = self.mkdtemp()
-        atexit.register(lambda: shutil.rmtree(tmpd))
+        # atexit.register(lambda: shutil.rmtree(tmpd))
         tf = args.testfile or os.path.join(tmpd, 'testfile')
         for c in configs:
             self.show_cfg(c)
@@ -1617,7 +1617,7 @@ def check_changes():
     subprocess.call("git status", cwd=os.path.dirname(os.path.realpath(__file__)), shell=True, stderr=subprocess.PIPE)
 
 def main():
-    check_changes()
+    # check_changes()
     parser = argparse.ArgumentParser()
     global_args(parser)
     subparsers = parser.add_subparsers(title="subcommands")
