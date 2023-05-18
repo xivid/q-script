@@ -1308,6 +1308,25 @@ class VMCreateCommand(SubCommand):
                 """
             ],
         },
+        'k3s': {
+            'url': "https://cloud-images.ubuntu.com/releases/jammy/release/ubuntu-22.04-server-cloudimg-amd64.img",
+            'customize_args': [
+                "--run-command", "touch .hushlogin",
+                "--run-command", "echo PasswordAuthentication yes >> /etc/ssh/sshd_config",
+                "--run-command", "echo PermitRootLogin yes >> /etc/ssh/sshd_config",
+                "--run-command", "echo PubkeyAcceptedKeyTypes +ssh-rsa >> /etc/ssh/sshd_config",
+                "--uninstall", "snap,snapd,cloud-init",
+                "--install", "dhcpcd5",
+                "--hostname", "k3s",
+                "--run-command", """curl -sfL https://get.k3s.io | sh -
+                    (
+                        for i in $(seq 18); do sleep 10; if kubectl get pod -A | grep Running | wc -l | grep -q -x 5; then echo k3s started; sync; exit 0; fi; done
+                        echo k3s cannot start
+                        exit 1
+                    )
+                """
+            ],
+        },
     }
 
     def setup_args(self, parser):
@@ -1424,6 +1443,7 @@ class CustomizeCommand(SubCommand):
         parser.add_argument("--install", default="")
         parser.add_argument("--uninstall", default="")
         parser.add_argument("--run-command", action="append", default=[])
+        parser.add_argument("--hostname")
         parser.add_argument("--root-password")
         parser.add_argument("--copy-in", action="append")
         parser.add_argument("--verbose", action="store_true")
@@ -1439,11 +1459,16 @@ class CustomizeCommand(SubCommand):
                 os.unlink(rawimg)
             else:
                 self.ssh_prepare(img, args.ssh_prepare)
-        if args.install or args.uninstall or args.run_command:
-            cmd = []
+        cmd = []
+        if args.install:
             cmd.append(self.make_install_cmd(args.install.split(',')))
+        if args.uninstall:
             cmd.append(self.make_uninstall_cmd(args.uninstall.split(',')))
+        if args.hostname:
+            cmd.append(f"echo {args.hostname} > /etc/hostname && hostname {args.hostname}")
+        if args.run_command:
             cmd += args.run_command
+        if cmd:
             q_cmd = [sys.argv[0], 'q', '+vblk:' + img, '-c', '\n'.join(cmd)]
             if args.verbose:
                 q_cmd += ['-serial', 'stdio']
