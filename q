@@ -1469,6 +1469,7 @@ class CustomizeCommand(SubCommand):
         if args.run_command:
             cmd += args.run_command
         if cmd:
+            cmd.append('sync')
             q_cmd = [sys.argv[0], 'q', '+vblk:' + img, '-c', '\n'.join(cmd)]
             if args.verbose:
                 q_cmd += ['-serial', 'stdio']
