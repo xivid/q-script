@@ -12,7 +12,7 @@ pages:
 
 build-linux:
   before_script:
-    - apk add make gcc elfutils-dev ccache git
+    - apk add make gcc elfutils-dev ccache git libc-dev flex bison
   script:
     - make -j$(nproc --ignore=1)
   artifacts:
