@@ -11,5 +11,7 @@ pages:
   - master
 
 build-linux:
+  before_script:
+    - apk add make gcc elfutils-dev ccache
   script:
     - make
