@@ -3,7 +3,7 @@ image: alpine:3.17
 pages:
   stage: deploy
   script:
-  - true
+  - date
   artifacts:
     paths:
     - public
