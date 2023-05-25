@@ -532,7 +532,7 @@ class QemuCommand(SubCommand):
         ret += ["-qmp", "unix:%s,server,nowait" % self._rundir_filename("qmp")]
         ret += ["-name", self.name]
         if not os.environ.get("DISPLAY"):
-            ret += ["-display", "none", "-vnc", "127.0.0.1:0,to=20"]
+            ret += ["-display", "none", "-vnc", "127.0.0.1:0,to=100"]
         # TODO: fix 10022 to a dynamic port
         if not args.no_net:
             ret += ["-netdev", "user,id=vnet,net=%s,host=%s,hostfwd=:0.0.0.0:%d-:22,hostfwd=:0.0.0.0:%d-:3389" % (args.net, args.host, self._sshport, self._rdpport),
