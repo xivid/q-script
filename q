@@ -505,8 +505,6 @@ class QemuCommand(SubCommand):
                             help="Wait for guest SSH service to start")
         parser.add_argument("--run-cmd", "-c",
                             help="Run command in guest and exit")
-        parser.add_argument("--no-shutdown", "-N",
-                            help="Don't shutdown after run-cmd is done")
         parser.add_argument("--net", default="10.0.2.0/24",
                             help="CIDR for the user net")
         parser.add_argument("--host", default="10.0.2.2",
@@ -708,8 +706,6 @@ class QemuCommand(SubCommand):
         if args.foreground:
             qemup.wait()
             return 0
-        if args.run_cmd and not args.no_shutdown:
-            atexit.register(lambda: do_hmp(args.name, 'q'))
         connected = False
         if args.wait_ssh or args.run_cmd:
             starttime = datetime.datetime.now()
@@ -732,7 +728,7 @@ class QemuCommand(SubCommand):
             time.sleep(0.5)
         if args.run_cmd:
             r = ssh_call(self._sshport, "root", args.run_cmd)
-            qemup.kill()
+            ssh_call(self._sshport, "root", 'poweroff')
             qemup.wait()
             return r
         return 0
@@ -1259,7 +1255,6 @@ class VMCreateCommand(SubCommand):
                 "--run-command", "echo PermitRootLogin yes >> /etc/ssh/sshd_config",
                 "--run-command", "echo PubkeyAcceptedKeyTypes +ssh-rsa >> /etc/ssh/sshd_config",
                 "--uninstall", "snap,snapd,cloud-init",
-                "--install", "dhcpcd5",
             ],
         },
         'ubuntu-arm64': {
@@ -1267,7 +1262,6 @@ class VMCreateCommand(SubCommand):
             'customize_args': [
                 "--run-command", "touch .hushlogin",
                 "--uninstall", "snap,snapd,cloud-init",
-                "--install", "dhcpcd5",
             ],
         },
         'ubuntu-iso': {
@@ -1275,7 +1269,6 @@ class VMCreateCommand(SubCommand):
             'customize_args': [
                 "--run-command", "touch .hushlogin",
                 "--uninstall", "snap,snapd,cloud-init",
-                "--install", "dhcpcd5",
             ],
         },
         'buster': {
@@ -1298,7 +1291,7 @@ class VMCreateCommand(SubCommand):
             'customize_args': [
                 "--run-command", "touch .hushlogin",
                 "--uninstall", "snap,snapd,cloud-init",
-                "--install", "unzip,dhcpcd5",
+                "--install", "unzip",
                 "--run-command", """
                 set -e
                 wget https://phoronix-test-suite.com/releases/repo/pts.debian/files/phoronix-test-suite_10.8.4_all.deb -O pts.deb
@@ -1314,7 +1307,6 @@ class VMCreateCommand(SubCommand):
                 "--run-command", "echo PermitRootLogin yes >> /etc/ssh/sshd_config",
                 "--run-command", "echo PubkeyAcceptedKeyTypes +ssh-rsa >> /etc/ssh/sshd_config",
                 "--uninstall", "snap,snapd,cloud-init",
-                "--install", "dhcpcd5",
                 "--hostname", "k3s",
                 "--run-command", """systemctl disable systemd-resolved
                                     systemctl stop systemd-resolved
@@ -1376,6 +1368,7 @@ class VMCreateCommand(SubCommand):
             '--run-command', 'echo SELINUX=disabled > /etc/selinux/config || true',
             '--copy-in', os.path.realpath(sys.argv[0]) + ':/usr/local/bin',
             '--run-command', """
+                set -x
                 for tty in tty0 ttyS0; do
                     mkdir -p /etc/systemd/system/serial-getty@$tty.service.d/ &&
                     cd /etc/systemd/system/serial-getty@$tty.service.d/ &&
@@ -1445,13 +1438,62 @@ class MkinitrdCommand(SubCommand):
     help = "Make initrd"
 
     def setup_args(self, parser):
-        parser.add_argument("--dir", "-d", required=True)
+        parser.add_argument("--cmd", "-c", default="true")
+        parser.add_argument("--script", "-s", default="")
         parser.add_argument("--output", "-o", required=True)
 
     def do(self, args, argv):
+        tmpd = tempfile.mkdtemp()
+        atexit.register(lambda: shutil.rmtree(tmpd))
         cmd = f"""
         set -e
-        (cd '{args.dir}'; find . -print0 | cpio --null -o --format=newc) > '{args.output}.cpio'
+        set -x
+        cd '{tmpd}';
+        mkdir -p bin dev sys proc sysroot
+        which busybox
+        ldd $(which busybox) 2>&1 | grep -q 'not a dynamic executable'
+        cp $(which busybox) busybox
+        ./busybox --list | while read x; do ln -s ../busybox bin/$x; done
+        if test -n "{args.script}"; then
+            cp "{args.script}" init-script
+        fi
+        cat >init <<EOF
+#!/bin/sh
+set -e
+set -x
+mount -t devtmpfs dev /dev
+mount -t sysfs sysfs /sys
+mount -t proc proc /proc
+for x in /dev/vda*; do
+    if mount \$x /sysroot; then
+        if test -d /sysroot/etc; then
+            break
+        fi
+        umount /sysroot
+    fi
+done
+if test -d /sysroot/etc; then
+    mount -o bind /sys /sysroot/sys
+    mount -o bind /dev /sysroot/dev
+    mount -o bind /proc /sysroot/proc
+    if test -n "{args.cmd}"; then
+        chroot /sysroot {args.cmd}
+    fi
+    if test -f /init-script; then
+        cp /init-script /sysroot/tmp/init-script
+        chroot /sysroot /bin/sh /tmp/init-script
+    fi
+    while ! umount -l /sysroot; do sleep 0.1; done
+    sync
+    echo o > /proc/sysrq-trigger
+else
+    echo Cannot find sysroot
+    echo o > /proc/sysrq-trigger
+fi
+/bin/sh -i
+EOF
+        chmod +x init
+        find . -print0 | cpio --null -o --format=newc > '{args.output}.cpio'
         gzip --fast -f '{args.output}.cpio'
         mv '{args.output}.cpio.gz' '{args.output}'
         """
@@ -1513,74 +1555,51 @@ class CustomizeCommand(SubCommand):
         return 'export DEBIAN_FRONTEND=noninteractive; apt-get remove -y ' + ' '.join(pkgs)
 
     def ssh_inject(self, img, pubkey):
-        print("ssh inject", img, pubkey)
-        ld = check_output(f"""sudo losetup -P -f --show "{img}" """).strip()
-        if not pubkey.startswith("ssh-rsa "):
+        if not pubkey.startswith("ssh-rsa ") and os.path.exists(pubkey):
             with open(pubkey, 'r') as f:
-                pubkey = f.read().strip()
-        try:
-            for x in check_output(f"ls {ld}p*").split():
-                print("trying", x)
-                if self.try_ssh_inject(x, pubkey):
-                    return True
-            raise Exception("Cannot find partition to prepare ssh")
-        finally:
-            check_output(f"sudo losetup -d {ld}")
-            # FIXME: this waits for the kernel loopback device to flush any
-            # changes back to the image
-            # This is racy and if we are not lucky, the guest ext4 gets
-            # corrupted during the next write in VM.
-            # The long term solution is to use a simple kernel and initrd to
-            # set up ssh instead of host loop mount, which also avoid sudo
-            # Pending on the kernel and initrd...
-            time.sleep(10)
+                pubkey = f.read()
+        script = f"""
+#!/bin/sh
+set -e
+mkdir -p /root/.ssh
+echo '{pubkey}' >> /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+ssh-keygen -A
+if test -n "{self.args.root_password}"; then
+    echo root:{self.args.root_password} | chpasswd
+fi
+cat >/etc/systemd/system/dhclient.service <<EOF
+    [Unit]
+    Description=dhclient service generated by q-script
 
-    def read_pubkey(self):
-        with open(os.path.expanduser("~/.ssh/id_rsa.pub"), "r") as f:
-            return f.read().strip()
+    [Service]
+    ExecStart=/usr/sbin/dhclient
+    Type=oneshot
 
-    def try_ssh_inject(self, dev, pubkey):
-        print("try_ssh_inject", dev)
-        mp = tempfile.mkdtemp()
-        try:
-            check_call(f"sudo mount {dev} {mp}")
-            cmd = f"""
-                set -e
-                set -x
-                cd {mp}
-                if test -d etc; then
-                    mkdir -p root/.ssh
-                    echo '{pubkey}' >> root/.ssh/authorized_keys
-                    chmod 600 root/.ssh/authorized_keys
-                    # needed for the initial ssh
-                    chroot {mp} sh -c 'ssh-keygen -A'
-                    if test -n "{self.args.root_password}"; then
-                        chroot {mp} sh -c 'echo root:{self.args.root_password} | chpasswd'
-                    fi
-                    (
-                        echo [Unit]
-                        echo Description=dhclient service generated by q-script
-                        echo
-                        echo [Service]
-                        echo ExecStart=/usr/sbin/dhclient
-                        echo Type=oneshot
-                        echo
-                        echo [Install]
-                        echo WantedBy=multi-user.target
-                    ) > {mp}/etc/systemd/system/dhclient.service
-                    chroot {mp} sh -c 'systemctl enable dhclient'
-                    sync
-                    exit 0
-                fi
-                exit 1
-            """
-            check_call(['sudo', 'bash', '-c', cmd])
-            return True
-        except Exception as e:
-            print(e)
-        finally:
-            subprocess.call(["sudo", "bash", "-c", "sync && umount %s" % dev])
-            shutil.rmtree(mp)
+    [Install]
+    WantedBy=multi-user.target
+EOF
+systemctl enable dhclient
+        """
+        with tempfile.NamedTemporaryFile() as tf:
+            tf.write(script.encode())
+            tf.flush()
+            initrd = tf.name + '.initfd'
+            cmd = [sys.argv[0], 'mkinitrd', '-s', tf.name, '-o', initrd]
+            check_call(cmd)
+            cache_dir = os.path.join(Q_RUNDIR, ".vmcreate")
+            kernel = os.path.join(cache_dir, "kernel")
+            if not os.path.exists(kernel):
+                kernel_tmp = kernel + ".tmp"
+                url = 'xxx'
+                subprocess.check_call(["wget", "-O", kernel_tmp + ".xz", url])
+                subprocess.check_call(["unxz", kernel_tmp + ".xz"])
+                subprocess.check_call(["mv", kernel_tmp, kernel])
+            append = 'console=ttyS0'
+            cmd = [sys.argv[0], 'q', '+vblk:' + img, '-f', '--',
+                  '-serial', 'stdio',
+                  '-kernel', kernel, '-append', append, '-initrd', initrd]
+            check_call(cmd)
 
 class PatchFilter(object):
     def __init__(self):
