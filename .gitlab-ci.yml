@@ -9,3 +9,7 @@ pages:
     - public
   only:
   - master
+
+build-linux:
+  script:
+    - make
