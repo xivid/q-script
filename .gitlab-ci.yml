@@ -12,6 +12,6 @@ pages:
 
 build-linux:
   before_script:
-    - apk add make gcc elfutils-dev ccache
+    - apk add make gcc elfutils-dev ccache git
   script:
     - make
