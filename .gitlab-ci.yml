@@ -15,3 +15,6 @@ build-linux:
     - apk add make gcc elfutils-dev ccache git
   script:
     - make
+  artifacts:
+    paths:
+      - build/bzImage.x86_64
