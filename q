@@ -1252,7 +1252,7 @@ class VMCreateCommand(SubCommand):
     help = "Create VM guests"
 
     flavors = {
-        'ubuntu': {
+        'ubuntu-22.04': {
             'url': "https://cloud-images.ubuntu.com/releases/jammy/release/ubuntu-22.04-server-cloudimg-amd64.img",
             'customize_args': [
                 "--run-command", "touch .hushlogin",
@@ -1322,8 +1322,8 @@ class VMCreateCommand(SubCommand):
                                     echo nameserver 8.8.8.8 > /etc/resolv.conf
                                     curl -sfL https://get.k3s.io | sh -
                                     rm /etc/rancher/k3s/k3s.yaml
-                                    touch /etc/rancher/k3s/should-rorate
-                                    echo ExecStartPre=/bin/sh -c "'if test -e /etc/rancher/k3s/should-rorate; then /usr/local/bin/k3s certificate rotate && rm /etc/rancher/k3s/should-rorate; fi'" >> /etc/systemd/system/multi-user.target.wants/k3s.service
+                                    touch /etc/rancher/k3s/should-rotate
+                                    echo ExecStartPre=/bin/sh -c "'if test -e /etc/rancher/k3s/should-rotate; then /usr/local/bin/k3s certificate rotate && rm /etc/rancher/k3s/should-rotate; fi'" >> /etc/systemd/system/multi-user.target.wants/k3s.service
                                     sync
                 """
             ],
@@ -1331,7 +1331,7 @@ class VMCreateCommand(SubCommand):
     }
 
     def setup_args(self, parser):
-        parser.add_argument("-f", "--flavor", default="ubuntu",
+        parser.add_argument("-f", "--flavor", default="ubuntu-22.04",
                             help="Guest VM flavor to create. supported: %s" % (', '.join(self.flavors)))
         parser.add_argument("--force", "-F", action="store_true",
                             help="Force overwrite the image")
@@ -1340,6 +1340,9 @@ class VMCreateCommand(SubCommand):
         parser.add_argument("--size", "-s", default="10G",
                             help="virtual size of the image. Specifying as 0 disables resize")
         parser.add_argument("image", help="Image file")
+        parser.add_argument("--root-password", default="testpass")
+        parser.add_argument("--hostname")
+        parser.add_argument("--run-command")
         parser.add_argument("--verbose", "-v", action="store_true")
 
     def create_image_via_cloud_image(self, flavor, url, args, customize_args=[]):
@@ -1364,6 +1367,10 @@ class VMCreateCommand(SubCommand):
             customize_args += ['--install', ','.join(install_pkgs)]
         if args.verbose:
             customize_args += ['--verbose']
+        if args.hostname:
+            customize_args += ['--hostname', args.hostname]
+        if args.run_command:
+            customize_args += ['--run-command', args.run_command]
         cmd = [sys.argv[0], 'customize'] + growcmds + [
             '--run-command', 'ssh-keygen -A',
             '--run-command', 'echo SELINUX=disabled > /etc/selinux/config || true',
@@ -1379,7 +1386,7 @@ class VMCreateCommand(SubCommand):
                     ) > override.conf
                 done
             """] + customize_args + [
-            '--root-password', 'testpass',
+            '--root-password', args.root_password,
             '--ssh-inject', os.path.expanduser("~/.ssh/id_rsa.pub"),
             '-a', args.image]
         print("\n".join(cmd))
@@ -1432,11 +1439,29 @@ class VMCreateCommand(SubCommand):
         flavor = self.flavors[args.flavor]
         self.create_image(args.flavor, flavor['url'], args, flavor.get("customize_args", []))
 
+class MkinitrdCommand(SubCommand):
+    name = "mkinitrd"
+    want_argv = False
+    help = "Make initrd"
+
+    def setup_args(self, parser):
+        parser.add_argument("--dir", "-d", required=True)
+        parser.add_argument("--output", "-o", required=True)
+
+    def do(self, args, argv):
+        cmd = f"""
+        set -e
+        (cd '{args.dir}'; find . -print0 | cpio --null -o --format=newc) > '{args.output}.cpio'
+        gzip --fast -f '{args.output}.cpio'
+        mv '{args.output}.cpio.gz' '{args.output}'
+        """
+        check_output(cmd)
+
 class CustomizeCommand(SubCommand):
     name = "customize"
     aliases = ['c']
     want_argv = False
-    help = "Filter git patch and make it easier for branch comparison"
+    help = "Customize image"
 
     def setup_args(self, parser):
         parser.add_argument("--image", "-a")
@@ -1487,17 +1512,28 @@ class CustomizeCommand(SubCommand):
             return "true"
         return 'export DEBIAN_FRONTEND=noninteractive; apt-get remove -y ' + ' '.join(pkgs)
 
-    def ssh_inject(self, img, pubkey_file):
+    def ssh_inject(self, img, pubkey):
+        print("ssh inject", img, pubkey)
         ld = check_output(f"""sudo losetup -P -f --show "{img}" """).strip()
+        if not pubkey.startswith("ssh-rsa "):
+            with open(pubkey, 'r') as f:
+                pubkey = f.read().strip()
         try:
             for x in check_output(f"ls {ld}p*").split():
-                with open(pubkey_file, 'r') as f:
-                    pubkey = f.read().strip()
+                print("trying", x)
                 if self.try_ssh_inject(x, pubkey):
                     return True
             raise Exception("Cannot find partition to prepare ssh")
         finally:
             check_output(f"sudo losetup -d {ld}")
+            # FIXME: this waits for the kernel loopback device to flush any
+            # changes back to the image
+            # This is racy and if we are not lucky, the guest ext4 gets
+            # corrupted during the next write in VM.
+            # The long term solution is to use a simple kernel and initrd to
+            # set up ssh instead of host loop mount, which also avoid sudo
+            # Pending on the kernel and initrd...
+            time.sleep(10)
 
     def read_pubkey(self):
         with open(os.path.expanduser("~/.ssh/id_rsa.pub"), "r") as f:
@@ -1516,6 +1552,7 @@ class CustomizeCommand(SubCommand):
                     mkdir -p root/.ssh
                     echo '{pubkey}' >> root/.ssh/authorized_keys
                     chmod 600 root/.ssh/authorized_keys
+                    # needed for the initial ssh
                     chroot {mp} sh -c 'ssh-keygen -A'
                     if test -n "{self.args.root_password}"; then
                         chroot {mp} sh -c 'echo root:{self.args.root_password} | chpasswd'
