@@ -1256,7 +1256,6 @@ class VMCreateCommand(SubCommand):
             'url': "https://cloud-images.ubuntu.com/releases/jammy/release/ubuntu-22.04-server-cloudimg-amd64.img",
             'customize_args': [
                 "--run-command", "touch .hushlogin",
-                "--run-command", "echo PasswordAuthentication yes >> /etc/ssh/sshd_config",
                 "--run-command", "echo PermitRootLogin yes >> /etc/ssh/sshd_config",
                 "--run-command", "echo PubkeyAcceptedKeyTypes +ssh-rsa >> /etc/ssh/sshd_config",
                 "--uninstall", "snap,snapd,cloud-init",
@@ -1312,7 +1311,6 @@ class VMCreateCommand(SubCommand):
             'url': "https://cloud-images.ubuntu.com/releases/jammy/release/ubuntu-22.04-server-cloudimg-amd64.img",
             'customize_args': [
                 "--run-command", "touch .hushlogin",
-                "--run-command", "echo PasswordAuthentication yes >> /etc/ssh/sshd_config",
                 "--run-command", "echo PermitRootLogin yes >> /etc/ssh/sshd_config",
                 "--run-command", "echo PubkeyAcceptedKeyTypes +ssh-rsa >> /etc/ssh/sshd_config",
                 "--uninstall", "snap,snapd,cloud-init",
@@ -1323,6 +1321,10 @@ class VMCreateCommand(SubCommand):
                                     rm /etc/resolv.conf
                                     echo nameserver 8.8.8.8 > /etc/resolv.conf
                                     curl -sfL https://get.k3s.io | sh -
+                                    rm /etc/rancher/k3s/k3s.yaml
+                                    touch /etc/rancher/k3s/should-rorate
+                                    echo ExecStartPre=/bin/sh -c "'if test -e /etc/rancher/k3s/should-rorate; then /usr/local/bin/k3s certificate rotate && rm /etc/rancher/k3s/should-rorate; fi'" >> /etc/systemd/system/multi-user.target.wants/k3s.service
+                                    sync
                 """
             ],
         },
@@ -1472,6 +1474,7 @@ class CustomizeCommand(SubCommand):
             q_cmd = [sys.argv[0], 'q', '+vblk:' + img, '-c', '\n'.join(cmd)]
             if args.verbose:
                 q_cmd += ['-serial', 'stdio']
+            print(q_cmd)
             check_call(q_cmd)
 
     def make_install_cmd(self, pkgs):
@@ -1539,7 +1542,7 @@ class CustomizeCommand(SubCommand):
         except Exception as e:
             print(e)
         finally:
-            subprocess.call(["sudo", "umount", dev])
+            subprocess.call(["sudo", "bash", "-c", "sync && umount %s" % dev])
             shutil.rmtree(mp)
 
 class PatchFilter(object):
