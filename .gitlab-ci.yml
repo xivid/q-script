@@ -14,7 +14,7 @@ build-linux:
   before_script:
     - apk add make gcc elfutils-dev ccache git
   script:
-    - make
+    - make -j$(nproc --ignore=1)
   artifacts:
     paths:
       - build/bzImage.x86_64
