@@ -1,5 +1,5 @@
 # The Docker image that will be used to build your app
-image: alpine:3.17
+image: ubuntu:22.04
 pages:
   stage: deploy
   script:
@@ -12,7 +12,8 @@ pages:
 
 build-linux:
   before_script:
-    - apk add make gcc elfutils-dev ccache git libc-dev flex bison linux-headers openssl-dev
+    - echo deb-src http://archive.ubuntu.com/ubuntu focal main restricted >> /etc/apt/sources.list
+    - DEBIAN_FRONTEND=noninteractive apt-get update -y && apk build-dep -y linux-image-5.15.0-60-generic
   script:
     - make -j$(nproc --ignore=1)
   artifacts:
