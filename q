@@ -1318,12 +1318,11 @@ class VMCreateCommand(SubCommand):
                 "--uninstall", "snap,snapd,cloud-init",
                 "--install", "dhcpcd5",
                 "--hostname", "k3s",
-                "--run-command", """curl -sfL https://get.k3s.io | sh -
-                    (
-                        for i in $(seq 18); do sleep 10; if kubectl get pod -A | grep Running | wc -l | grep -q -x 5; then echo k3s started; sync; exit 0; fi; done
-                        echo k3s cannot start
-                        exit 1
-                    )
+                "--run-command", """systemctl disable systemd-resolved
+                                    systemctl stop systemd-resolved
+                                    rm /etc/resolv.conf
+                                    echo nameserver 8.8.8.8 > /etc/resolv.conf
+                                    curl -sfL https://get.k3s.io | sh -
                 """
             ],
         },
