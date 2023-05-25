@@ -1378,7 +1378,7 @@ class VMCreateCommand(SubCommand):
                 done
             """] + customize_args + [
             '--root-password', 'testpass',
-            '--ssh-prepare',
+            '--ssh-inject', os.path.expanduser("~/.ssh/id_rsa.pub"),
             '-a', args.image]
         print("\n".join(cmd))
         subprocess.check_call(cmd)
@@ -1438,7 +1438,7 @@ class CustomizeCommand(SubCommand):
 
     def setup_args(self, parser):
         parser.add_argument("--image", "-a")
-        parser.add_argument("--ssh-prepare", action="store_true")
+        parser.add_argument("--ssh-inject")
         parser.add_argument("--install", default="")
         parser.add_argument("--uninstall", default="")
         parser.add_argument("--run-command", action="append", default=[])
@@ -1449,15 +1449,15 @@ class CustomizeCommand(SubCommand):
 
     def do(self, args, argv):
         img = args.image
-        if args.ssh_prepare or args.root_password:
+        if args.ssh_inject or args.root_password:
             if 'qcow2' in check_output(['qemu-img', 'info', img]):
                 rawimg = img + ".raw"
                 check_output(['qemu-img', 'convert', img, rawimg])
-                self.ssh_prepare(rawimg)
+                self.ssh_inject(rawimg, args.ssh_inject)
                 check_output(['qemu-img', 'convert', rawimg, img, '-O', 'qcow2'])
                 os.unlink(rawimg)
             else:
-                self.ssh_prepare(img, args.ssh_prepare)
+                self.ssh_inject(img, args.ssh_inject)
         cmd = []
         if args.install:
             cmd.append(self.make_install_cmd(args.install.split(',')))
@@ -1484,11 +1484,13 @@ class CustomizeCommand(SubCommand):
             return "true"
         return 'export DEBIAN_FRONTEND=noninteractive; apt-get remove -y ' + ' '.join(pkgs)
 
-    def ssh_prepare(self, img):
+    def ssh_inject(self, img, pubkey_file):
         ld = check_output(f"""sudo losetup -P -f --show "{img}" """).strip()
         try:
             for x in check_output(f"ls {ld}p*").split():
-                if self.try_ssh_prepare(x):
+                with open(pubkey_file, 'r') as f:
+                    pubkey = f.read().strip()
+                if self.try_ssh_inject(x, pubkey):
                     return True
             raise Exception("Cannot find partition to prepare ssh")
         finally:
@@ -1498,10 +1500,9 @@ class CustomizeCommand(SubCommand):
         with open(os.path.expanduser("~/.ssh/id_rsa.pub"), "r") as f:
             return f.read().strip()
 
-    def try_ssh_prepare(self, dev):
-        print("try_ssh_prepare", dev)
+    def try_ssh_inject(self, dev, pubkey):
+        print("try_ssh_inject", dev)
         mp = tempfile.mkdtemp()
-        pubkey = self.read_pubkey()
         try:
             check_call(f"sudo mount {dev} {mp}")
             cmd = f"""
@@ -1510,7 +1511,7 @@ class CustomizeCommand(SubCommand):
                 cd {mp}
                 if test -d etc; then
                     mkdir -p root/.ssh
-                    echo {pubkey} >> root/.ssh/authorized_keys
+                    echo '{pubkey}' >> root/.ssh/authorized_keys
                     chmod 600 root/.ssh/authorized_keys
                     chroot {mp} sh -c 'ssh-keygen -A'
                     if test -n "{self.args.root_password}"; then
