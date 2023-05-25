@@ -13,7 +13,7 @@ pages:
 build-linux:
   before_script:
     - echo deb-src http://archive.ubuntu.com/ubuntu focal main restricted >> /etc/apt/sources.list
-    - DEBIAN_FRONTEND=noninteractive apt-get update -y && apk build-dep -y linux-image-5.15.0-60-generic
+    - DEBIAN_FRONTEND=noninteractive apt-get update -y && apt build-dep -y linux-image-5.15.0-60-generic
   script:
     - make -j$(nproc --ignore=1)
   artifacts:
