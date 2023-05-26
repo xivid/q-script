@@ -20,4 +20,4 @@ build-linux:
     - make -j$(nproc --ignore=1)
   artifacts:
     paths:
-      - build/bzImage.x86_64
+      - build/bzImage.x86_64.xz
