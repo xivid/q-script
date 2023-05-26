@@ -1591,9 +1591,8 @@ systemctl enable dhclient
             kernel = os.path.join(cache_dir, "kernel")
             if not os.path.exists(kernel):
                 kernel_tmp = kernel + ".tmp"
-                url = 'xxx'
-                subprocess.check_call(["wget", "-O", kernel_tmp + ".xz", url])
-                subprocess.check_call(["unxz", kernel_tmp + ".xz"])
+                url = 'https://gitlab.com/famzheng/q-script/-/jobs/4354551823/artifacts/raw/build/bzImage.x86_64'
+                subprocess.check_call(["wget", "-O", kernel_tmp, url])
                 subprocess.check_call(["mv", kernel_tmp, kernel])
             append = 'console=ttyS0'
             cmd = [sys.argv[0], 'q', '+vblk:' + img, '-f', '--',
