@@ -1313,9 +1313,6 @@ class VMCreateCommand(SubCommand):
                                     rm /etc/resolv.conf
                                     echo nameserver 8.8.8.8 > /etc/resolv.conf
                                     curl -sfL https://get.k3s.io | sh -
-                                    rm /etc/rancher/k3s/k3s.yaml
-                                    touch /etc/rancher/k3s/should-rotate
-                                    echo ExecStartPre=/bin/sh -c "'if test -e /etc/rancher/k3s/should-rotate; then /usr/local/bin/k3s certificate rotate && rm /etc/rancher/k3s/should-rotate; fi'" >> /etc/systemd/system/multi-user.target.wants/k3s.service
                                     sync
                 """
             ],
