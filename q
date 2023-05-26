@@ -1590,10 +1590,10 @@ systemctl enable dhclient
             cache_dir = os.path.join(Q_RUNDIR, ".vmcreate")
             kernel = os.path.join(cache_dir, "kernel")
             if not os.path.exists(kernel):
-                kernel_tmp = kernel + ".tmp"
-                url = 'https://gitlab.com/famzheng/q-script/-/jobs/4354551823/artifacts/raw/build/bzImage.x86_64'
-                subprocess.check_call(["wget", "-O", kernel_tmp, url])
-                subprocess.check_call(["mv", kernel_tmp, kernel])
+                kernel_xz = kernel + ".xz"
+                url = 'https://gitlab.com/famzheng/q-script/-/jobs/4356281461/artifacts/raw/build/bzImage.x86_64.xz'
+                subprocess.check_call(["wget", "-O", kernel_xz, url])
+                subprocess.check_call(["unxz", kernel_xz])
             append = 'console=ttyS0'
             cmd = [sys.argv[0], 'q', '+vblk:' + img, '-f', '--',
                   '-serial', 'stdio',
