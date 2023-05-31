@@ -2,7 +2,7 @@
 
 The q command to work with QEMU
 
-## VM management
+## Quickstart
 
 ### Creating a vm
 
