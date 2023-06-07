@@ -505,8 +505,6 @@ class QemuCommand(SubCommand):
                             help="Wait for guest SSH service to start")
         parser.add_argument("--run-cmd", "-c",
                             help="Run command in guest and exit")
-        parser.add_argument("--no-shutdown", "-N",
-                            help="Don't shutdown after run-cmd is done")
         parser.add_argument("--net", default="10.0.2.0/24",
                             help="CIDR for the user net")
         parser.add_argument("--host", default="10.0.2.2",
@@ -532,7 +530,7 @@ class QemuCommand(SubCommand):
         ret += ["-qmp", "unix:%s,server,nowait" % self._rundir_filename("qmp")]
         ret += ["-name", self.name]
         if not os.environ.get("DISPLAY"):
-            ret += ["-display", "none", "-vnc", "127.0.0.1:0,to=20"]
+            ret += ["-display", "none", "-vnc", "127.0.0.1:0,to=100"]
         # TODO: fix 10022 to a dynamic port
         if not args.no_net:
             ret += ["-netdev", "user,id=vnet,net=%s,host=%s,hostfwd=:0.0.0.0:%d-:22,hostfwd=:0.0.0.0:%d-:3389" % (args.net, args.host, self._sshport, self._rdpport),
@@ -708,8 +706,6 @@ class QemuCommand(SubCommand):
         if args.foreground:
             qemup.wait()
             return 0
-        if args.run_cmd and not args.no_shutdown:
-            atexit.register(lambda: do_hmp(args.name, 'q'))
         connected = False
         if args.wait_ssh or args.run_cmd:
             starttime = datetime.datetime.now()
@@ -732,7 +728,7 @@ class QemuCommand(SubCommand):
             time.sleep(0.5)
         if args.run_cmd:
             r = ssh_call(self._sshport, "root", args.run_cmd)
-            qemup.kill()
+            ssh_call(self._sshport, "root", 'poweroff')
             qemup.wait()
             return r
         return 0
@@ -1252,15 +1248,13 @@ class VMCreateCommand(SubCommand):
     help = "Create VM guests"
 
     flavors = {
-        'ubuntu': {
+        'ubuntu-22.04': {
             'url': "https://cloud-images.ubuntu.com/releases/jammy/release/ubuntu-22.04-server-cloudimg-amd64.img",
             'customize_args': [
                 "--run-command", "touch .hushlogin",
-                "--run-command", "echo PasswordAuthentication yes >> /etc/ssh/sshd_config",
                 "--run-command", "echo PermitRootLogin yes >> /etc/ssh/sshd_config",
                 "--run-command", "echo PubkeyAcceptedKeyTypes +ssh-rsa >> /etc/ssh/sshd_config",
                 "--uninstall", "snap,snapd,cloud-init",
-                "--install", "dhcpcd5",
             ],
         },
         'ubuntu-arm64': {
@@ -1268,7 +1262,6 @@ class VMCreateCommand(SubCommand):
             'customize_args': [
                 "--run-command", "touch .hushlogin",
                 "--uninstall", "snap,snapd,cloud-init",
-                "--install", "dhcpcd5",
             ],
         },
         'ubuntu-iso': {
@@ -1276,7 +1269,6 @@ class VMCreateCommand(SubCommand):
             'customize_args': [
                 "--run-command", "touch .hushlogin",
                 "--uninstall", "snap,snapd,cloud-init",
-                "--install", "dhcpcd5",
             ],
         },
         'buster': {
@@ -1299,7 +1291,7 @@ class VMCreateCommand(SubCommand):
             'customize_args': [
                 "--run-command", "touch .hushlogin",
                 "--uninstall", "snap,snapd,cloud-init",
-                "--install", "unzip,dhcpcd5",
+                "--install", "unzip",
                 "--run-command", """
                 set -e
                 wget https://phoronix-test-suite.com/releases/repo/pts.debian/files/phoronix-test-suite_10.8.4_all.deb -O pts.deb
@@ -1308,10 +1300,27 @@ class VMCreateCommand(SubCommand):
                 """
             ],
         },
+        'k3s': {
+            'url': "https://cloud-images.ubuntu.com/releases/jammy/release/ubuntu-22.04-server-cloudimg-amd64.img",
+            'customize_args': [
+                "--run-command", "touch .hushlogin",
+                "--run-command", "echo PermitRootLogin yes >> /etc/ssh/sshd_config",
+                "--run-command", "echo PubkeyAcceptedKeyTypes +ssh-rsa >> /etc/ssh/sshd_config",
+                "--uninstall", "snap,snapd,cloud-init",
+                "--hostname", "k3s",
+                "--run-command", """systemctl disable systemd-resolved
+                                    systemctl stop systemd-resolved
+                                    rm /etc/resolv.conf
+                                    echo nameserver 8.8.8.8 > /etc/resolv.conf
+                                    curl -sfL https://get.k3s.io | sh -
+                                    sync
+                """
+            ],
+        },
     }
 
     def setup_args(self, parser):
-        parser.add_argument("-f", "--flavor", default="ubuntu",
+        parser.add_argument("-f", "--flavor", default="ubuntu-22.04",
                             help="Guest VM flavor to create. supported: %s" % (', '.join(self.flavors)))
         parser.add_argument("--force", "-F", action="store_true",
                             help="Force overwrite the image")
@@ -1320,6 +1329,9 @@ class VMCreateCommand(SubCommand):
         parser.add_argument("--size", "-s", default="10G",
                             help="virtual size of the image. Specifying as 0 disables resize")
         parser.add_argument("image", help="Image file")
+        parser.add_argument("--root-password", default="testpass")
+        parser.add_argument("--hostname")
+        parser.add_argument("--run-command")
         parser.add_argument("--verbose", "-v", action="store_true")
 
     def create_image_via_cloud_image(self, flavor, url, args, customize_args=[]):
@@ -1344,11 +1356,16 @@ class VMCreateCommand(SubCommand):
             customize_args += ['--install', ','.join(install_pkgs)]
         if args.verbose:
             customize_args += ['--verbose']
+        if args.hostname:
+            customize_args += ['--hostname', args.hostname]
+        if args.run_command:
+            customize_args += ['--run-command', args.run_command]
         cmd = [sys.argv[0], 'customize'] + growcmds + [
             '--run-command', 'ssh-keygen -A',
             '--run-command', 'echo SELINUX=disabled > /etc/selinux/config || true',
             '--copy-in', os.path.realpath(sys.argv[0]) + ':/usr/local/bin',
             '--run-command', """
+                set -x
                 for tty in tty0 ttyS0; do
                     mkdir -p /etc/systemd/system/serial-getty@$tty.service.d/ &&
                     cd /etc/systemd/system/serial-getty@$tty.service.d/ &&
@@ -1359,8 +1376,8 @@ class VMCreateCommand(SubCommand):
                     ) > override.conf
                 done
             """] + customize_args + [
-            '--root-password', 'testpass',
-            '--ssh-prepare',
+            '--root-password', args.root_password,
+            '--ssh-inject', os.path.expanduser("~/.ssh/id_rsa.pub"),
             '-a', args.image]
         print("\n".join(cmd))
         subprocess.check_call(cmd)
@@ -1412,41 +1429,116 @@ class VMCreateCommand(SubCommand):
         flavor = self.flavors[args.flavor]
         self.create_image(args.flavor, flavor['url'], args, flavor.get("customize_args", []))
 
+class MkinitrdCommand(SubCommand):
+    name = "mkinitrd"
+    want_argv = False
+    help = "Make initrd"
+
+    def setup_args(self, parser):
+        parser.add_argument("--cmd", "-c", default="true")
+        parser.add_argument("--script", "-s", default="")
+        parser.add_argument("--output", "-o", required=True)
+
+    def do(self, args, argv):
+        tmpd = tempfile.mkdtemp()
+        atexit.register(lambda: shutil.rmtree(tmpd))
+        cmd = f"""
+        set -e
+        set -x
+        cd '{tmpd}';
+        mkdir -p bin dev sys proc sysroot
+        which busybox
+        ldd $(which busybox) 2>&1 | grep -q 'not a dynamic executable'
+        cp $(which busybox) busybox
+        ./busybox --list | while read x; do ln -s ../busybox bin/$x; done
+        if test -n "{args.script}"; then
+            cp "{args.script}" init-script
+        fi
+        cat >init <<EOF
+#!/bin/sh
+set -e
+set -x
+mount -t devtmpfs dev /dev
+mount -t sysfs sysfs /sys
+mount -t proc proc /proc
+for x in /dev/vda*; do
+    if mount \$x /sysroot; then
+        if test -d /sysroot/etc; then
+            break
+        fi
+        umount /sysroot
+    fi
+done
+if test -d /sysroot/etc; then
+    mount -o bind /sys /sysroot/sys
+    mount -o bind /dev /sysroot/dev
+    mount -o bind /proc /sysroot/proc
+    if test -n "{args.cmd}"; then
+        chroot /sysroot {args.cmd}
+    fi
+    if test -f /init-script; then
+        cp /init-script /sysroot/tmp/init-script
+        chroot /sysroot /bin/sh /tmp/init-script
+    fi
+    while ! umount -l /sysroot; do sleep 0.1; done
+    sync
+    echo o > /proc/sysrq-trigger
+else
+    echo Cannot find sysroot
+    echo o > /proc/sysrq-trigger
+fi
+/bin/sh -i
+EOF
+        chmod +x init
+        find . -print0 | cpio --null -o --format=newc > '{args.output}.cpio'
+        gzip --fast -f '{args.output}.cpio'
+        mv '{args.output}.cpio.gz' '{args.output}'
+        """
+        check_output(cmd)
+
 class CustomizeCommand(SubCommand):
     name = "customize"
     aliases = ['c']
     want_argv = False
-    help = "Filter git patch and make it easier for branch comparison"
+    help = "Customize image"
 
     def setup_args(self, parser):
         parser.add_argument("--image", "-a")
-        parser.add_argument("--ssh-prepare", action="store_true")
+        parser.add_argument("--ssh-inject")
         parser.add_argument("--install", default="")
         parser.add_argument("--uninstall", default="")
         parser.add_argument("--run-command", action="append", default=[])
+        parser.add_argument("--hostname")
         parser.add_argument("--root-password")
         parser.add_argument("--copy-in", action="append")
         parser.add_argument("--verbose", action="store_true")
 
     def do(self, args, argv):
         img = args.image
-        if args.ssh_prepare or args.root_password:
+        if args.ssh_inject or args.root_password:
             if 'qcow2' in check_output(['qemu-img', 'info', img]):
                 rawimg = img + ".raw"
                 check_output(['qemu-img', 'convert', img, rawimg])
-                self.ssh_prepare(rawimg)
+                self.ssh_inject(rawimg, args.ssh_inject)
                 check_output(['qemu-img', 'convert', rawimg, img, '-O', 'qcow2'])
                 os.unlink(rawimg)
             else:
-                self.ssh_prepare(img, args.ssh_prepare)
-        if args.install or args.uninstall or args.run_command:
-            cmd = []
+                self.ssh_inject(img, args.ssh_inject)
+        cmd = []
+        if args.install:
             cmd.append(self.make_install_cmd(args.install.split(',')))
+        if args.uninstall:
             cmd.append(self.make_uninstall_cmd(args.uninstall.split(',')))
+        if args.hostname:
+            cmd.append(f"echo {args.hostname} > /etc/hostname && hostname {args.hostname}")
+        if args.run_command:
             cmd += args.run_command
+        if cmd:
+            cmd.append('sync')
             q_cmd = [sys.argv[0], 'q', '+vblk:' + img, '-c', '\n'.join(cmd)]
             if args.verbose:
                 q_cmd += ['-serial', 'stdio']
+            print(q_cmd)
             check_call(q_cmd)
 
     def make_install_cmd(self, pkgs):
@@ -1459,62 +1551,51 @@ class CustomizeCommand(SubCommand):
             return "true"
         return 'export DEBIAN_FRONTEND=noninteractive; apt-get remove -y ' + ' '.join(pkgs)
 
-    def ssh_prepare(self, img):
-        ld = check_output(f"""sudo losetup -P -f --show "{img}" """).strip()
-        try:
-            for x in check_output(f"ls {ld}p*").split():
-                if self.try_ssh_prepare(x):
-                    return True
-            raise Exception("Cannot find partition to prepare ssh")
-        finally:
-            check_output(f"sudo losetup -d {ld}")
+    def ssh_inject(self, img, pubkey):
+        if not pubkey.startswith("ssh-rsa ") and os.path.exists(pubkey):
+            with open(pubkey, 'r') as f:
+                pubkey = f.read()
+        script = f"""
+#!/bin/sh
+set -e
+mkdir -p /root/.ssh
+echo '{pubkey}' >> /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+ssh-keygen -A
+if test -n "{self.args.root_password}"; then
+    echo root:{self.args.root_password} | chpasswd
+fi
+cat >/etc/systemd/system/dhclient.service <<EOF
+    [Unit]
+    Description=dhclient service generated by q-script
 
-    def read_pubkey(self):
-        with open(os.path.expanduser("~/.ssh/id_rsa.pub"), "r") as f:
-            return f.read().strip()
+    [Service]
+    ExecStart=/usr/sbin/dhclient
+    Type=oneshot
 
-    def try_ssh_prepare(self, dev):
-        print("try_ssh_prepare", dev)
-        mp = tempfile.mkdtemp()
-        pubkey = self.read_pubkey()
-        try:
-            check_call(f"sudo mount {dev} {mp}")
-            cmd = f"""
-                set -e
-                set -x
-                cd {mp}
-                if test -d etc; then
-                    mkdir -p root/.ssh
-                    echo {pubkey} >> root/.ssh/authorized_keys
-                    chmod 600 root/.ssh/authorized_keys
-                    chroot {mp} sh -c 'ssh-keygen -A'
-                    if test -n "{self.args.root_password}"; then
-                        chroot {mp} sh -c 'echo root:{self.args.root_password} | chpasswd'
-                    fi
-                    (
-                        echo [Unit]
-                        echo Description=dhclient service generated by q-script
-                        echo
-                        echo [Service]
-                        echo ExecStart=/usr/sbin/dhclient
-                        echo Type=oneshot
-                        echo
-                        echo [Install]
-                        echo WantedBy=multi-user.target
-                    ) > {mp}/etc/systemd/system/dhclient.service
-                    chroot {mp} sh -c 'systemctl enable dhclient'
-                    sync
-                    exit 0
-                fi
-                exit 1
-            """
-            check_call(['sudo', 'bash', '-c', cmd])
-            return True
-        except Exception as e:
-            print(e)
-        finally:
-            subprocess.call(["sudo", "umount", dev])
-            shutil.rmtree(mp)
+    [Install]
+    WantedBy=multi-user.target
+EOF
+systemctl enable dhclient
+        """
+        with tempfile.NamedTemporaryFile() as tf:
+            tf.write(script.encode())
+            tf.flush()
+            initrd = tf.name + '.initfd'
+            cmd = [sys.argv[0], 'mkinitrd', '-s', tf.name, '-o', initrd]
+            check_call(cmd)
+            cache_dir = os.path.join(Q_RUNDIR, ".vmcreate")
+            kernel = os.path.join(cache_dir, "kernel")
+            if not os.path.exists(kernel):
+                kernel_xz = kernel + ".xz"
+                url = 'https://gitlab.com/famzheng/q-script/-/jobs/4356281461/artifacts/raw/build/bzImage.x86_64.xz'
+                subprocess.check_call(["wget", "-O", kernel_xz, url])
+                subprocess.check_call(["unxz", kernel_xz])
+            append = 'console=ttyS0'
+            cmd = [sys.argv[0], 'q', '+vblk:' + img, '-f', '--',
+                  '-serial', 'stdio',
+                  '-kernel', kernel, '-append', append, '-initrd', initrd]
+            check_call(cmd)
 
 class PatchFilter(object):
     def __init__(self):
@@ -1613,11 +1694,8 @@ class FlamegraphCommand(SubCommand):
 def global_args(parser):
     parser.add_argument("-D", "--debug", action="store_true",
                         help="Enable debug output")
-def check_changes():
-    subprocess.call("git status", cwd=os.path.dirname(os.path.realpath(__file__)), shell=True, stderr=subprocess.PIPE)
 
 def main():
-    # check_changes()
     parser = argparse.ArgumentParser()
     global_args(parser)
     subparsers = parser.add_subparsers(title="subcommands")
