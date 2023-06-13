@@ -522,7 +522,9 @@ class QemuCommand(SubCommand):
     def _def_args(self, args, argv):
         self._sshport = find_port(10022)
         self._rdpport = find_port(13389)
-        ret = ["-enable-kvm", '-cpu', 'max', '-machine', self.get_machine_type()]
+        ret = ["-enable-kvm"]
+        if '+sev' not in argv:
+            ret += ['-cpu', 'max', '-machine', self.get_machine_type()]
         if '-m' not in argv:
             ret += ["-m", args.memory]
         if '-smp' not in argv:
@@ -530,7 +532,7 @@ class QemuCommand(SubCommand):
         ret += ["-qmp", "unix:%s,server,nowait" % self._rundir_filename("qmp")]
         ret += ["-name", self.name]
         if not os.environ.get("DISPLAY"):
-            ret += ["-display", "none", "-vnc", "127.0.0.1:0,to=100"]
+            ret += ["-display", "none", "-vnc", ":0,to=100"]
         # TODO: fix 10022 to a dynamic port
         if not args.no_net:
             ret += ["-netdev", "user,id=vnet,net=%s,host=%s,hostfwd=:0.0.0.0:%d-:22,hostfwd=:0.0.0.0:%d-:3389" % (args.net, args.host, self._sshport, self._rdpport),
@@ -545,6 +547,8 @@ class QemuCommand(SubCommand):
     def _gen_drive(self, s):
         drive = self._gen_id("drive-")
         optstr = "file=%s,if=none,id=%s" % (s, drive)
+        if ".raw" in s:
+            optstr += ",format=raw"
         if "cache=" not in optstr:
             try:
                 fpath = os.path.realpath(s)
@@ -560,10 +564,13 @@ class QemuCommand(SubCommand):
 
     def _devtmpl_sev(self, s):
         return [
-                "-object", "sev-guest,id=sev0,cbitpos=51,reduced-phys-bits=5",
-                "-machine", "q35,memory-encryption=sev0",
+                "-cpu", "EPYC-v4",
+                "-machine", "pc-q35-7.1",
+                "-no-reboot",
                 "-drive", "if=pflash,format=raw,unit=0,file=OVMF_CODE.fd,readonly=on",
                 "-drive", "if=pflash,format=raw,unit=1,file=OVMF_VARS.fd",
+                "-machine", "memory-encryption=sev0,vmport=off",
+                "-object", "sev-guest,id=sev0,cbitpos=51,reduced-phys-bits=1",
         ]
 
     def _devtmpl_vblk(self, s):
@@ -1029,17 +1036,10 @@ class FioCommand(SubCommand):
     iodepth={iodepth}
     size={size}
     direct=1
+    ramp_time=30
     runtime={runtime}
     filename={testfile}
     time_based=1
-
-    [seq-read]
-    rw=read
-    stonewall
-
-    [rand-read]
-    rw=randread
-    stonewall
 
     [seq-write]
     rw=write
@@ -1051,6 +1051,14 @@ class FioCommand(SubCommand):
 
     [rand-rw]
     rw=randrw
+    stonewall
+
+    [seq-read]
+    rw=read
+    stonewall
+
+    [rand-read]
+    rw=randread
     stonewall
     """
 
@@ -1667,9 +1675,10 @@ class FlamegraphCommand(SubCommand):
         parser.add_argument("--output", "-o", required=True)
         parser.add_argument("--data", "-d", type=str, help="perf data path")
 
-    def perf_record(self, argv):
-        td = self.mkdtemp()
-        fn = td + "/perf.data"
+    def perf_record(self, argv, output):
+        # td = self.mkdtemp()
+        # fn = td + "/perf.data"
+        fn = output + ".perf.data"
         check_call(['sudo', '-n', 'perf', 'record', '-a', '-g', '-o', fn] + argv)
         return fn
 
@@ -1688,7 +1697,7 @@ class FlamegraphCommand(SubCommand):
         if args.data:
             fn = args.data
         else:
-            fn = self.perf_record(argv)
+            fn = self.perf_record(argv, args.output)
         self.gen_flame_graph(fn, args.output)
 
 def global_args(parser):
